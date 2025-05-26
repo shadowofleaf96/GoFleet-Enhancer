@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>GoFleet Enhancer</title>
+    <style>
+      body {
+        width: 220px;
+        margin: 0;
+        padding: 15px;
+        font-family: "Segoe UI", sans-serif;
+        background: #f8f9fa;
+        color: #2d3436;
+      }
+      .header {
+        text-align: center;
+        margin-bottom: 1.2em;
+      }
+      .logo {
+        width: 48px;
+        height: 48px;
+        margin-bottom: 8px;
+      }
+      .title {
+        font-size: 1.1em;
+        font-weight: 600;
+        margin: 0;
+      }
+      .downloadButton {
+        background: linear-gradient(135deg, #4a90e2, #2f80ed);
+        color: white;
+        width: 100%;
+        padding: 12px 20px;
+        border: none;
+        border-radius: 8px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: transform 0.2s, box-shadow 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        box-shadow: 0 4px 6px rgba(79, 114, 205, 0.15);
+      }
+      .downloadButton:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 6px 12px rgba(79, 114, 205, 0.25);
+      }
+      .downloadButton:active {
+        transform: translateY(0);
+      }
+      #exportEchec {
+        margin-bottom: 1em;
+      }
+      .footer {
+        margin-top: 1.5em;
+        text-align: center;
+        font-size: 0.8em;
+        color: #7f8c8d;
+        border-top: 1px solid #e0e0e0;
+        padding-top: 1em;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1 class="title">Exportateur GO Fleet</h1>
+    </div>
+
+    <button class="downloadButton" id="exportEchec">
+      <svg
+        class="icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        style="width: 18px; height: 18px"
+      >
+        <path
+          d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z"
+          stroke-width="2"
+        />
+        <path d="M14 2V8H20M12 18V12M9 15H15" />
+      </svg>
+      Echecs de Livraison et Retours
+    </button>
+
+    <div class="footer">1.0.0 ShadowOfLeaf</div>
+
+    <script src="popup.js"></script>
+    <script src="xlsx.full.min.js"></script>
+    <script src="xlsx-populate.min.js"></script>
+  </body>
+</html>
