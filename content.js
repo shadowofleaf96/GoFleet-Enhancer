@@ -198,7 +198,6 @@ if (barcodeInput) {
     }
   }
 
-  // Update the initialization
   const timelineEl = document.querySelector("ul.timeline");
 
   if (timelineEl) {
@@ -233,6 +232,9 @@ if (barcodeInput) {
       attributes: true,
     });
   }
+  setInterval(checkForNotification, 1000);
+  barcodeInput.addEventListener("input", checkForNotification);
+  setTimeout(checkForNotification, 300);
 }
 
 // Add debug logs and improve page detection
@@ -253,6 +255,7 @@ function handleExpeditionRequests(request, sender, sendResponse) {
         pallets:
           card.querySelector(".small.text-dark")?.textContent.trim() || "0",
       }));
+
       sendResponse({ expeditions });
     } else if (
       window.location.pathname.includes(

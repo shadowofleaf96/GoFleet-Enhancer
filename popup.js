@@ -108,31 +108,33 @@ document.addEventListener("DOMContentLoaded", async () => {
       currentWindow: true,
     });
 
-    async function waitForContentScript(tabId) {
-      return new Promise((resolve) => {
-        const listener = (message, sender) => {
-          if (sender.tab?.id === tabId && message?.ready) {
-            chrome.runtime.onMessage.removeListener(listener);
-            resolve();
-          }
-        };
-        chrome.runtime.onMessage.addListener(listener);
-        setTimeout(resolve, 5000); // Extended timeout
-      });
+    // Store original URL at start
+    const originalUrl = tab.url;
+    let currentUrl = originalUrl;
+
+    async function navigateWithRetry(url, maxAttempts = 3) {
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        await chrome.tabs.update(tab.id, { url });
+        await new Promise(r => setTimeout(r, 2000));
+
+        const newUrl = (await chrome.tabs.get(tab.id)).url;
+        if (newUrl === url) {
+          currentUrl = newUrl;
+          return true;
+        }
+
+        if (attempt === maxAttempts) throw new Error(`Navigation failed to ${url}`);
+        await new Promise(r => setTimeout(r, attempt * 1000));
+      }
     }
 
     async function processPalette(palette, expedition) {
-      await chrome.tabs.update(tab.id, {
-        url: new URL(palette.link, expedition.link).href,
-      });
+      const paletteUrl = new URL(palette.link, expedition.link).href;
 
-      // Wait for both navigation and content script
-      await Promise.race([
-        waitForContentScript(tab.id),
-        new Promise((resolve) => setTimeout(resolve, 5000)),
-      ]);
+      // Navigate to palette page
+      await navigateWithRetry(paletteUrl);
 
-      // Retry with backoff
+      // Collect data with retries
       let colisData;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
@@ -140,53 +142,74 @@ document.addEventListener("DOMContentLoaded", async () => {
             action: "collectFullExpeditionData",
           });
           if (colisData?.colisList?.length) break;
-          await new Promise((r) => setTimeout(r, attempt * 1000));
         } catch (error) {
           console.warn(`Attempt ${attempt} failed:`, error);
         }
+        await new Promise(r => setTimeout(r, attempt * 1000));
       }
+
+      // Return to expedition edit page
+      await navigateWithRetry(expedition.link);
 
       return colisData?.colisList || [];
     }
 
     try {
-      // Step 1: Get initial expedition list
+      // --- MAIN PROCESSING FLOW ---
+      // 1. Get initial list
       const initialData = await chrome.tabs.sendMessage(tab.id, {
         action: "collectFullExpeditionData",
       });
-      if (!initialData?.expeditions?.length)
-        throw new Error("No expeditions found");
 
-      // Process expeditions sequentially
+      // 2. Filter valid expeditions
+      const validExpeditions = initialData?.expeditions?.filter(exp => {
+        const cleanedStatus = exp.status
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .trim();
+        return cleanedStatus === "en cours de creation";
+      }) || [];
+
+      if (validExpeditions.length === 0) {
+        const total = initialData?.expeditions?.length || 0;
+        throw new Error(total > 0 ?
+          `${total} expeditions found, none with "En cours de création" status` :
+          "No expeditions found in the list");
+      }
+
+      // 3. Process valid expeditions
       const processedExpeditions = [];
-      for (const expedition of initialData.expeditions) {
-        await chrome.tabs.update(tab.id, { url: expedition.link });
-        await new Promise((r) => setTimeout(r, 2000)); // Hard wait for navigation
 
-        let detailData = await chrome.tabs.sendMessage(tab.id, {
-          action: "collectFullExpeditionData",
-        });
+      for (const expedition of validExpeditions) {
+        // Navigate to expedition edit page
+        await navigateWithRetry(expedition.link);
 
-        // Fallback in case you land on the wrong page
-        if (!detailData?.palettes) {
-          // Force navigation to the proper /Edit page
-          const editUrl = expedition.link;
-          await chrome.tabs.update(tab.id, { url: editUrl });
-          await new Promise((r) => setTimeout(r, 2000));
+        // Collect expedition data
+        let detailData;
+        try {
           detailData = await chrome.tabs.sendMessage(tab.id, {
             action: "collectFullExpeditionData",
           });
+        } catch (error) {
+          console.error("Failed to collect expedition data:", error);
+          continue; // Skip failed expedition
         }
 
+        // Process palettes
         const processedPalettes = [];
         for (const palette of detailData.palettes) {
-          const colisList = await processPalette(palette, expedition);
-          processedPalettes.push({
-            ...palette,
-            colis: colisList,
-            colisCount: colisList.length,
-            collectedAt: new Date().toISOString(),
-          });
+          try {
+            const colisList = await processPalette(palette, expedition);
+            processedPalettes.push({
+              ...palette,
+              colis: colisList,
+              colisCount: colisList.length,
+              collectedAt: new Date().toISOString(),
+            });
+          } catch (error) {
+            console.error("Failed to process palette:", palette.number, error);
+          }
         }
 
         processedExpeditions.push({
@@ -195,15 +218,19 @@ document.addEventListener("DOMContentLoaded", async () => {
           plombNumber: detailData.plombNumber,
           palettes: processedPalettes,
         });
+
+        // Return to list page between expeditions
+        await navigateWithRetry(originalUrl);
       }
 
+      // 4. Final cleanup
+      await navigateWithRetry(originalUrl);
       await chrome.storage.local.set({ expeditions: processedExpeditions });
-      const verification = await chrome.storage.local.get("expeditions");
       await generateExcel();
-      if (!verification.expeditions?.length)
-        throw new Error("Storage verification failed");
+
     } catch (error) {
       console.error("Export failed:", error);
+      await navigateWithRetry(originalUrl);
       alert(`Export failed: ${error.message}`);
     }
   });
