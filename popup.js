@@ -234,4 +234,69 @@ document.addEventListener("DOMContentLoaded", async () => {
       alert(`Export failed: ${error.message}`);
     }
   });
-});
+
+  function formatDateForFilename(date = new Date()) {
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+
+    return `${day}-${month}-${year}`
+  }
+
+  document.getElementById('exportRefused').addEventListener('click', async () => {
+    try {
+      const { refusedColis = [] } = await chrome.storage.local.get({ refusedColis: [] });
+
+      if (refusedColis.length === 0) {
+        alert('Aucune donnée à exporter !')
+        return;
+      }
+
+      const cleanData = refusedColis.map(item => ({
+        Date: item.date,
+        Colis: item.colis,
+        "Raison Annulation": item.raisonAnnulation,
+        Livreur: item.livreur,
+        Description: ""
+      }));
+
+      // Create workbook
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(cleanData);
+
+      // Set column widths for better visibility
+      const colWidths = [
+        { wch: 15 },
+        { wch: 25 },
+        { wch: 35 },
+        { wch: 30 },
+        { wch: 20 }
+      ];
+      ws['!cols'] = colWidths;
+
+      const headerStyle = {
+        font: { bold: true, color: { rgb: "FFFFFF" } },
+        fill: { fgColor: { rgb: "4A6CF7" } },
+        alignment: { horizontal: "center" }
+      };
+
+      const headerRow = ["Date", "Colis", "Raison Annulation", "Livreur", "Description"];
+      XLSX.utils.sheet_add_aoa(ws, [headerRow], { origin: "A1" });
+
+      for (let col = 0; col < headerRow.length; col++) {
+        const cellRef = XLSX.utils.encode_cell({ r: 0, c: col });
+        if (!ws[cellRef]) ws[cellRef] = {};
+        if (!ws[cellRef].s) ws[cellRef].s = {};
+        Object.assign(ws[cellRef].s, headerStyle);
+      }
+
+      XLSX.utils.book_append_sheet(wb, ws, "Colis Refusés");
+
+      const dateString = formatDateForFilename();
+      XLSX.writeFile(wb, `colis_refusés_${dateString}.xlsx`);
+    } catch (error) {
+      console.error('Export échoué:', error);
+      alert(`Erreur: ${error.message}`)
+    }
+  })
+})

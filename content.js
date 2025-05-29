@@ -112,12 +112,7 @@ if (barcodeInput) {
     }
   });
 
-  const toastDisplayCounts = {};
-  function showToast(message, key, color = "#4CAF50") {
-    // Limit to 5 times per unique key
-    toastDisplayCounts[key] = (toastDisplayCounts[key] || 0) + 1;
-    if (toastDisplayCounts[key] > 5) return;
-
+  function showToast(message, color = "#4CAF50") {
     const toast = document.createElement("div");
     toast.innerHTML = `
     <div style="display:flex;align-items:center;gap:12px;max-width:320px;word-break:break-word;">
@@ -131,26 +126,26 @@ if (barcodeInput) {
     Object.assign(toast.style, {
       position: "fixed",
       bottom: "24px",
-      left: "50%",
-      transform: "translateX(-50%) translateY(20px)",
+      right: "12px",
       background: "rgba(33,33,33,0.85)",
       color: "#FFF",
-      padding: "16px 24px",
+      padding: "8px 8px",
       borderRadius: "10px",
       backdropFilter: "blur(5px)",
       boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
       fontFamily: "Inter, sans-serif",
-      fontSize: "15px",
+      fontSize: "13px",
       lineHeight: "1.5",
       opacity: "0",
       transition: "opacity 0.35s ease, transform 0.35s ease",
       zIndex: "10000",
+      transform: "translateY(20px)",
     });
 
     document.body.appendChild(toast);
     requestAnimationFrame(() => {
       toast.style.opacity = "1";
-      toast.style.transform = "translateX(-50%) translateY(0)";
+      toast.style.transform = "translateY(0)";
     });
 
     setTimeout(() => {
@@ -159,38 +154,22 @@ if (barcodeInput) {
   }
 
   function checkForNotification() {
-    const items = Array.from(document.querySelectorAll(".tournee-state"))
-      .filter(
-        (el) => el.textContent.trim().toLowerCase() === "pris en charge livreur"
-      )
-      .map((el) => {
-        const card = el.closest(".card");
-        if (!card) return null;
-
-        const dateEl = card.querySelector(".dateh-timeline");
-        if (!dateEl) return null;
-
-        const fullDate = dateEl.textContent.trim();
-        const dateOnly = fullDate.split("à")[0].trim();
-        return dateOnly;
-      })
-      .filter(Boolean);
-
-    const uniqueDates = new Set(items);
-    const count = uniqueDates.size;
+    const count = Array.from(
+      document.querySelectorAll(".tournee-state")
+    ).filter(
+      (el) => el.textContent.trim().toLowerCase() === "assigné livreur"
+    ).length;
 
     if (count === 2 && !notificationCooldown) {
       showToast(
-        "Attention : 2 fois « Pris en charge livreur » – veuillez mentionner « 3 tentatives ».",
-        "2-tentatives",
+        "Attention : 2 fois « Assignée Livreur » – veuillez procéder au cachet du colis « 3 tentatives »",
         "#FFC107"
       );
       notificationCooldown = true;
       setTimeout(() => (notificationCooldown = false), 3000);
     } else if (count >= 3 && !notificationCooldown) {
       showToast(
-        `Attention : Pris en charge ${count} jours différents – annulation requise.`,
-        "annulation-requise",
+        `Attention : Assignée Livreur ${count} fois – , veuillez procéder a annuler cette colis`,
         "#E53935"
       );
       notificationCooldown = true;
@@ -198,44 +177,19 @@ if (barcodeInput) {
     }
   }
 
-  const timelineEl = document.querySelector("ul.timeline");
+  // Update the initialization
+  const observer = new MutationObserver(checkForNotification);
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
 
-  if (timelineEl) {
-    const observer = new MutationObserver((mutationsList, observer) => {
-      let hasChanges = false;
-
-      for (const mutation of mutationsList) {
-        if (
-          mutation.type === "childList" &&
-          (mutation.addedNodes.length || mutation.removedNodes.length)
-        ) {
-          hasChanges = true;
-        }
-        if (
-          mutation.type === "attributes" ||
-          mutation.type === "characterData"
-        ) {
-          hasChanges = true;
-        }
-      }
-
-      if (hasChanges) {
-        console.log("Timeline updated");
-        checkForNotification();
-      }
-    });
-
-    observer.observe(timelineEl, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-      attributes: true,
-    });
-  }
   setInterval(checkForNotification, 1000);
   barcodeInput.addEventListener("input", checkForNotification);
   setTimeout(checkForNotification, 300);
 }
+
 
 // Add debug logs and improve page detection
 function handleExpeditionRequests(request, sender, sendResponse) {
@@ -368,3 +322,59 @@ function handleExpeditionRequests(request, sender, sendResponse) {
 }
 
 chrome.runtime.onMessage.addListener(handleExpeditionRequests);
+
+function extractRefusedColis() {
+  // Get today's date in DD/MM/YYYY format
+  const today = new Date();
+  const formattedDate = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
+
+  // Extract livreur name
+  const livreurElement = document.querySelector('.caissier-style label.ml-3');
+  const livreur = livreurElement ? livreurElement.textContent.trim() : 'Unknown';
+
+  // First get existing data to check for duplicates
+  chrome.storage.local.get({ refusedColis: [] }, function (result) {
+    const existingColis = result.refusedColis;
+    const existingColisNumbers = new Set(existingColis.map(item => item.colis));
+
+    // Extract refused colis data
+    const newRefusedColis = [];
+
+    document.querySelectorAll('.js-colis-data').forEach(card => {
+      const status = card.querySelector('.js-statut-info');
+      if (status && status.textContent.includes('Refusé')) {
+        // Extract colis number
+        const colisElement = card.querySelector('h6.style-87');
+        const colisNumber = colisElement
+          ? colisElement.textContent.replace('Colis N°', '').trim()
+          : 'Unknown';
+
+        // Only add if this colis isn't already stored
+        if (!existingColisNumbers.has(colisNumber)) {
+          // Extract reason
+          const reasonElement = card.querySelector('.redo');
+          const reason = reasonElement
+            ? reasonElement.textContent.trim()
+            : 'Unknown';
+
+          newRefusedColis.push({
+            date: formattedDate,
+            colis: colisNumber,
+            raisonAnnulation: reason,
+            livreur: livreur,
+            description: "" // Empty as per requirement
+          });
+        }
+      }
+    });
+
+    if (newRefusedColis.length > 0) {
+      chrome.runtime.sendMessage({
+        action: 'storeRefusedColis',
+        data: newRefusedColis
+      });
+    }
+  });
+}
+
+setTimeout(extractRefusedColis, 2000);

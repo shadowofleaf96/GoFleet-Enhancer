@@ -1,92 +1,283 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <title>GoFleet Enhancer</title>
-    <style>
-      body {
-        width: 220px;
-        margin: 0;
-        padding: 15px;
-        font-family: "Segoe UI", sans-serif;
-        background: #f8f9fa;
-        color: #2d3436;
-      }
-      .header {
-        text-align: center;
-        margin-bottom: 1.2em;
-      }
-      .logo {
-        width: 48px;
-        height: 48px;
-        margin-bottom: 8px;
-      }
-      .title {
-        font-size: 1.1em;
-        font-weight: 600;
-        margin: 0;
-      }
-      .downloadButton {
-        background: linear-gradient(135deg, #4a90e2, #2f80ed);
-        color: white;
-        width: 100%;
-        padding: 12px 20px;
-        border: none;
-        border-radius: 8px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: transform 0.2s, box-shadow 0.2s;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        box-shadow: 0 4px 6px rgba(79, 114, 205, 0.15);
-      }
-      .downloadButton:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 6px 12px rgba(79, 114, 205, 0.25);
-      }
-      .downloadButton:active {
-        transform: translateY(0);
-      }
-      #exportEchec {
-        margin-bottom: 1em;
-      }
-      .footer {
-        margin-top: 1.5em;
-        text-align: center;
-        font-size: 0.8em;
-        color: #7f8c8d;
-        border-top: 1px solid #e0e0e0;
-        padding-top: 1em;
-      }
-    </style>
-  </head>
-  <body>
+<html lang="fr">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GoFleet Enhancer</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    body {
+      background: linear-gradient(135deg, #f5f9fc 0%, #e6f0f7 100%);
+      height: 450px;
+      width: 400px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+      color: #2d3748;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 1024px;
+      /* Increased width */
+      background: white;
+      border-radius: 20px;
+      box-shadow: 0 15px 50px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+      position: relative;
+      z-index: 1;
+    }
+
+    .container::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 180px;
+      background: linear-gradient(135deg, #4a6cf7 0%, #8e2de2 100%);
+      z-index: -1;
+      border-radius: 0 0 50% 50%;
+      transform: scale(2.5, 1);
+    }
+
+    .header {
+      text-align: center;
+      padding: 40px 30px 25px;
+      position: relative;
+    }
+
+    .logo-container {
+      width: 80px;
+      height: 80px;
+      background: white;
+      border-radius: 50%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin: 0 auto 20px;
+      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+    }
+
+    .logo {
+      font-size: 36px;
+      color: #4a6cf7;
+    }
+
+    .title {
+      font-size: 24px;
+      font-weight: 700;
+      color: white;
+      margin-bottom: 8px;
+    }
+
+    .content {
+      padding: 0 12px 12px;
+    }
+
+    .buttons-container {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      margin-bottom: 5px;
+    }
+
+    .downloadButton {
+      background: white;
+      color: white;
+      width: 100%;
+      padding: 12px 16px;
+      border: none;
+      border-radius: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+      text-align: left;
+      position: relative;
+      overflow: hidden;
+      z-index: 1;
+    }
+
+    .downloadButton::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: -1;
+      transition: opacity 0.3s ease;
+      opacity: 1;
+    }
+
+    .downloadButton:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 12px 25px rgba(0, 0, 0, 0.15);
+    }
+
+    .downloadButton:active {
+      transform: translateY(0);
+    }
+
+    #exportEchec {
+      background: linear-gradient(135deg, #FF6B6B, #FF8E53);
+    }
+
+    #exportRefused {
+      background: linear-gradient(135deg, #4A90E2, #5D69BE);
+    }
+
+    .button-content {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .icon-container {
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 12px;
+      padding: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .icon {
+      width: 24px;
+      height: 24px;
+      stroke-width: 2;
+      color: white;
+    }
+
+    .button-text {
+      display: flex;
+      flex-direction: column;
+      flex-grow: 1;
+    }
+
+    .button-main-text {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+
+    .button-sub-text {
+      font-size: 13px;
+      font-weight: 400;
+      opacity: 0.9;
+      margin-top: 4px;
+    }
+
+    #status {
+      padding: 15px;
+      border-radius: 14px;
+      background: white;
+      text-align: center;
+      font-size: 14px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+      border: 1px solid #edf2f7;
+      min-height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s ease;
+    }
+
+    .status-loading {
+      color: #4a6cf7;
+      font-weight: 500;
+    }
+
+    .status-success {
+      color: #38a169;
+      background: rgba(56, 161, 105, 0.08);
+      border-color: rgba(56, 161, 105, 0.2);
+    }
+
+    .status-error {
+      color: #e53e3e;
+      background: rgba(229, 62, 62, 0.08);
+      border-color: rgba(229, 62, 62, 0.2);
+    }
+
+    .footer {
+      margin-top: 10px;
+      text-align: center;
+      font-size: 12px;
+      color: #a0aec0;
+      padding-top: 20px;
+      border-top: 1px solid #edf2f7;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
     <div class="header">
-      <h1 class="title">Exportateur GO Fleet</h1>
+      <div class="logo-container">
+        <div class="logo">
+          <i class="fas fa-box-open"></i>
+        </div>
+      </div>
+      <h1 class="title">GoFeet Enhancer</h1>
     </div>
 
-    <button class="downloadButton" id="exportEchec">
-      <svg
-        class="icon"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        style="width: 18px; height: 18px"
-      >
-        <path
-          d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z"
-          stroke-width="2"
-        />
-        <path d="M14 2V8H20M12 18V12M9 15H15" />
-      </svg>
-      Echecs de Livraison et Retours
-    </button>
+    <div class="content">
+      <div class="buttons-container">
+        <button class="downloadButton" id="exportEchec">
+          <div class="button-content">
+            <div class="icon-container">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path
+                  d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" />
+                <path d="M14 2V8H20M12 18V12M9 15H15" />
+              </svg>
+            </div>
+            <div class="button-text">
+              <div class="button-main-text">Échecs de Livraison et Retours</div>
+              <div class="button-sub-text">Exporter les colis en échec et retournés</div>
+            </div>
+          </div>
+        </button>
 
-    <div class="footer">1.0.0 ShadowOfLeaf</div>
+        <button class="downloadButton" id="exportRefused">
+          <div class="button-content">
+            <div class="icon-container">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path
+                  d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" />
+                <path d="M14 2V8H20M9 16L15 10M15 16L9 10" />
+              </svg>
+            </div>
+            <div class="button-text">
+              <div class="button-main-text">Colis Refusés avec Raison</div>
+              <div class="button-sub-text">Exporter les colis refusés avec la raison d'annulation</div>
+            </div>
+          </div>
+        </button>
+      </div>
+    </div>
 
-    <script src="popup.js"></script>
-    <script src="xlsx.full.min.js"></script>
-    <script src="xlsx-populate.min.js"></script>
-  </body>
+    <div class="footer">
+      Shadow Of Leaf • v1.0 •
+    </div>
+  </div>
+
+  <script src="xlsx.full.min.js"></script>
+  <script src="xlsx-populate.min.js"></script>
+  <script src="popup.js"></script>
+</body>
 </html>
