@@ -7,9 +7,21 @@ function formatDate(date = new Date()) {
 
 async function generateExcel() {
   try {
-    const { expeditions } = await chrome.storage.local.get("expeditions");
+    const { expeditions = [] } = await chrome.storage.local.get("expeditions");
 
-    // Load template
+    const today = new Date();
+    const todayFormatted = formatDate(today);
+
+    const todayExpeditions = expeditions.filter(exp => {
+      const expDate = exp.timestamp ? formatDate(new Date(exp.timestamp)) : null;
+      return expDate === todayFormatted;
+    });
+
+    if (todayExpeditions.length === 0) {
+      alert("Aucune expédition trouvée pour aujourd'hui !");
+      return;
+    }
+
     const templatePath = chrome.runtime.getURL(
       "dummy-content/ECHEC-RETOUR_CLIENT-CASABLANCA.xlsx"
     );
@@ -19,9 +31,8 @@ async function generateExcel() {
 
     const workbook = await XlsxPopulate.fromDataAsync(templateBuffer);
 
-    // Process data with suffix
     const processData = (suffix) =>
-      expeditions.flatMap((exp) =>
+      todayExpeditions.flatMap((exp) =>
         exp.palettes
           .filter((p) => p.number.endsWith(suffix))
           .map((p) => ({
@@ -33,7 +44,6 @@ async function generateExcel() {
           }))
       );
 
-    // Helper to format date as you have in your original function
     function formatDate(date = new Date()) {
       const d = date;
       const month = `${d.getMonth() + 1}`.padStart(2, "0");
@@ -45,15 +55,11 @@ async function generateExcel() {
     // Update sheet
     const updateSheet = (sheetName, data) => {
       const sheet = workbook.sheet(sheetName);
-      const today = new Date();
-
       sheet.cell("I2").value(formatDate(today));
-      console.log(data);
 
       data.forEach((item) => {
         sheet.cell("J4").value(item.expeditionNumber);
         sheet.cell("J5").value(item.tourneeNumber);
-
         sheet.cell("J9").value(item.colisCount);
 
         ["A", "B", "C", "D", "E"].forEach((col) => {
@@ -245,14 +251,23 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById('exportRefused').addEventListener('click', async () => {
     try {
+      // Get current date in DD/MM/YYYY format (same format used in storage)
+      const today = new Date();
+      const todayFormatted = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
+
+      // Get all refused colis from storage
       const { refusedColis = [] } = await chrome.storage.local.get({ refusedColis: [] });
 
-      if (refusedColis.length === 0) {
-        alert('Aucune donnée à exporter !')
+      // Filter to only include today's data
+      const todayRefusedColis = refusedColis.filter(item => item.date === todayFormatted);
+
+      if (todayRefusedColis.length === 0) {
+        alert('Aucune donnée à exporter pour aujourd\'hui !');
         return;
       }
 
-      const cleanData = refusedColis.map(item => ({
+      // Prepare data for export
+      const cleanData = todayRefusedColis.map(item => ({
         Date: item.date,
         Colis: item.colis,
         "Raison Annulation": item.raisonAnnulation,
@@ -264,25 +279,28 @@ document.addEventListener("DOMContentLoaded", async () => {
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(cleanData);
 
-      // Set column widths for better visibility
+      // Set column widths
       const colWidths = [
-        { wch: 15 },
-        { wch: 25 },
-        { wch: 35 },
-        { wch: 30 },
-        { wch: 20 }
+        { wch: 15 },  // Date
+        { wch: 25 },  // Colis
+        { wch: 35 },  // Raison Annulation
+        { wch: 30 },  // Livreur
+        { wch: 20 }   // Description
       ];
       ws['!cols'] = colWidths;
 
+      // Style headers
       const headerStyle = {
         font: { bold: true, color: { rgb: "FFFFFF" } },
         fill: { fgColor: { rgb: "4A6CF7" } },
         alignment: { horizontal: "center" }
       };
 
+      // Add headers
       const headerRow = ["Date", "Colis", "Raison Annulation", "Livreur", "Description"];
       XLSX.utils.sheet_add_aoa(ws, [headerRow], { origin: "A1" });
 
+      // Apply header styles
       for (let col = 0; col < headerRow.length; col++) {
         const cellRef = XLSX.utils.encode_cell({ r: 0, c: col });
         if (!ws[cellRef]) ws[cellRef] = {};
@@ -290,13 +308,18 @@ document.addEventListener("DOMContentLoaded", async () => {
         Object.assign(ws[cellRef].s, headerStyle);
       }
 
+      // Add worksheet to workbook
       XLSX.utils.book_append_sheet(wb, ws, "Colis Refusés");
 
+      // Generate filename with today's date
       const dateString = formatDateForFilename();
-      XLSX.writeFile(wb, `colis_refusés_${dateString}.xlsx`);
+      XLSX.writeFile(wb, `Colis_refusés_${dateString}.xlsx`);
+
+      // Success notification
+      alert(`Exportation réussie: ${todayRefusedColis.length} colis refusés exportés pour aujourd'hui`);
     } catch (error) {
       console.error('Export échoué:', error);
-      alert(`Erreur: ${error.message}`)
+      alert(`Erreur: ${error.message}`);
     }
-  })
+  });
 })
