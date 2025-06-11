@@ -9,19 +9,6 @@ async function generateExcel() {
   try {
     const { expeditions = [] } = await chrome.storage.local.get("expeditions");
 
-    const today = new Date();
-    const todayFormatted = formatDate(today);
-
-    const todayExpeditions = expeditions.filter(exp => {
-      const expDate = exp.timestamp ? formatDate(new Date(exp.timestamp)) : null;
-      return expDate === todayFormatted;
-    });
-
-    if (todayExpeditions.length === 0) {
-      alert("Aucune expédition trouvée pour aujourd'hui !");
-      return;
-    }
-
     const templatePath = chrome.runtime.getURL(
       "dummy-content/ECHEC-RETOUR_CLIENT-CASABLANCA.xlsx"
     );
@@ -32,7 +19,7 @@ async function generateExcel() {
     const workbook = await XlsxPopulate.fromDataAsync(templateBuffer);
 
     const processData = (suffix) =>
-      todayExpeditions.flatMap((exp) =>
+      expeditions.flatMap((exp) =>
         exp.palettes
           .filter((p) => p.number.endsWith(suffix))
           .map((p) => ({
@@ -55,7 +42,7 @@ async function generateExcel() {
     // Update sheet
     const updateSheet = (sheetName, data) => {
       const sheet = workbook.sheet(sheetName);
-      sheet.cell("I2").value(formatDate(today));
+      sheet.cell("I2").value(formatDate());
 
       data.forEach((item) => {
         sheet.cell("J4").value(item.expeditionNumber);
@@ -97,6 +84,10 @@ async function generateExcel() {
     a.download = `ECHEC DE LIVRAISON _RETOUR CLIENT_${formatDate()}.xlsx`;
     document.body.appendChild(a);
     a.click();
+
+    // Remove expeditions after successful export
+    await chrome.storage.local.remove("expeditions");
+
     setTimeout(() => {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
@@ -118,127 +109,220 @@ document.addEventListener("DOMContentLoaded", async () => {
     const originalUrl = tab.url;
     let currentUrl = originalUrl;
 
-    async function navigateWithRetry(url, maxAttempts = 3) {
+    // Configuration - Adjust these values as needed
+    const config = {
+      navigationTimeout: 5000, // Increased from 2000 to 5000ms
+      retryDelay: 3000, // Increased from 1000 to 3000ms
+      maxRetries: 5, // Increased from 3 to 5 attempts
+      dataCollectionDelay: 5000, // Added delay after page loads
+      betweenExpeditionDelay: 5000 // Delay between processing expeditions
+    };
+
+    // Enhanced navigation with timeout and retry
+    async function navigateWithRetry(url, maxAttempts = config.maxRetries) {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        await chrome.tabs.update(tab.id, { url });
-        await new Promise(r => setTimeout(r, 2000));
+        try {
+          await chrome.tabs.update(tab.id, { url });
 
-        const newUrl = (await chrome.tabs.get(tab.id)).url;
-        if (newUrl === url) {
-          currentUrl = newUrl;
+          // Wait for page to load with timeout
+          await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error(`Navigation timeout for ${url}`)), config.navigationTimeout);
+
+            const checkComplete = async () => {
+              const newUrl = (await chrome.tabs.get(tab.id)).url;
+              if (newUrl === url) {
+                clearTimeout(timeout);
+                currentUrl = newUrl;
+                resolve();
+              }
+            };
+
+            // Check every 500ms
+            const interval = setInterval(checkComplete, 500);
+          });
+
+          // Additional delay after successful navigation
+          await new Promise(r => setTimeout(r, config.dataCollectionDelay));
           return true;
-        }
 
-        if (attempt === maxAttempts) throw new Error(`Navigation failed to ${url}`);
-        await new Promise(r => setTimeout(r, attempt * 1000));
+        } catch (error) {
+          console.warn(`Navigation attempt ${attempt} failed:`, error);
+          if (attempt === maxAttempts) throw error;
+          await new Promise(r => setTimeout(r, attempt * config.retryDelay));
+        }
       }
     }
 
+    // Enhanced data collection with status checks
     async function processPalette(palette, expedition) {
       const paletteUrl = new URL(palette.link, expedition.link).href;
 
-      // Navigate to palette page
+      // Navigate to palette page with enhanced retry
       await navigateWithRetry(paletteUrl);
 
-      // Collect data with retries
+      // Collect data with multiple retries and validation
       let colisData;
-      for (let attempt = 1; attempt <= 3; attempt++) {
+      for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
         try {
           colisData = await chrome.tabs.sendMessage(tab.id, {
             action: "collectFullExpeditionData",
           });
-          if (colisData?.colisList?.length) break;
+
+          // Validate the collected data
+          if (colisData?.colisList?.length) {
+            console.log(`Successfully collected ${colisData.colisList.length} items from palette ${palette.number}`);
+            break;
+          } else {
+            throw new Error("Empty or invalid colis data");
+          }
         } catch (error) {
-          console.warn(`Attempt ${attempt} failed:`, error);
+          console.warn(`Attempt ${attempt} failed for palette ${palette.number}:`, error);
+          if (attempt === config.maxRetries) throw error;
+          await new Promise(r => setTimeout(r, attempt * config.retryDelay));
         }
-        await new Promise(r => setTimeout(r, attempt * 1000));
       }
 
       // Return to expedition edit page
       await navigateWithRetry(expedition.link);
 
-      return colisData?.colisList || [];
+      return colisData.colisList;
     }
 
-    try {
-      // --- MAIN PROCESSING FLOW ---
-      // 1. Get initial list
-      const initialData = await chrome.tabs.sendMessage(tab.id, {
-        action: "collectFullExpeditionData",
-      });
+    // Main processing function with enhanced error handling
+    async function processExpeditions() {
+      try {
+        // --- INITIAL DATA COLLECTION ---
+        console.log("Starting initial data collection...");
+        const initialData = await chrome.tabs.sendMessage(tab.id, {
+          action: "collectFullExpeditionData",
+        });
 
-      // 2. Filter valid expeditions
-      const validExpeditions = initialData?.expeditions?.filter(exp => {
-        const cleanedStatus = exp.status
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLowerCase()
-          .trim();
-        return cleanedStatus === "en cours de creation";
-      }) || [];
-
-      if (validExpeditions.length === 0) {
-        const total = initialData?.expeditions?.length || 0;
-        throw new Error(total > 0 ?
-          `${total} expeditions found, none with "En cours de création" status` :
-          "No expeditions found in the list");
-      }
-
-      // 3. Process valid expeditions
-      const processedExpeditions = [];
-
-      for (const expedition of validExpeditions) {
-        // Navigate to expedition edit page
-        await navigateWithRetry(expedition.link);
-
-        // Collect expedition data
-        let detailData;
-        try {
-          detailData = await chrome.tabs.sendMessage(tab.id, {
-            action: "collectFullExpeditionData",
-          });
-        } catch (error) {
-          console.error("Failed to collect expedition data:", error);
-          continue; // Skip failed expedition
+        if (!initialData?.expeditions) {
+          throw new Error("No expedition data found on the initial page");
         }
 
-        // Process palettes
-        const processedPalettes = [];
-        for (const palette of detailData.palettes) {
+        // --- FILTER EXPEDITIONS ---
+        const allowedStatuses = [
+          "en cours de creation",
+          "en cours d'expedition mm"
+        ];
+
+        const validExpeditions = initialData.expeditions.filter(exp => {
+          const cleanedStatus = exp.status
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[’‘`´]/g, "'")
+            .toLowerCase()
+            .trim();
+
+          return allowedStatuses.includes(cleanedStatus);
+        });
+
+        if (validExpeditions.length === 0) {
+          const total = initialData.expeditions.length;
+          throw new Error(total > 0 ?
+            `${total} expeditions found, none with required status` :
+            "No expeditions found in the list");
+        }
+
+        console.log(`Found ${validExpeditions.length} valid expeditions to process`);
+
+        // --- PROCESS EACH EXPEDITION ---
+        const processedExpeditions = [];
+        let processedCount = 0;
+
+        for (const expedition of validExpeditions) {
           try {
-            const colisList = await processPalette(palette, expedition);
-            processedPalettes.push({
-              ...palette,
-              colis: colisList,
-              colisCount: colisList.length,
-              collectedAt: new Date().toISOString(),
+            console.log(`Processing expedition ${processedCount + 1}/${validExpeditions.length}: ${expedition.number}`);
+
+            // Navigate to expedition edit page
+            await navigateWithRetry(expedition.link);
+
+            // Collect expedition details
+            let detailData;
+            try {
+              detailData = await chrome.tabs.sendMessage(tab.id, {
+                action: "collectFullExpeditionData",
+              });
+            } catch (error) {
+              console.error("Failed to collect expedition data:", error);
+              continue;
+            }
+
+            // Process each palette
+            const processedPalettes = [];
+            for (const palette of detailData.palettes) {
+              try {
+                console.log(`Processing palette ${palette.number}`);
+                const colisList = await processPalette(palette, expedition);
+
+                processedPalettes.push({
+                  ...palette,
+                  colis: colisList,
+                  colisCount: colisList.length,
+                  collectedAt: new Date().toISOString(),
+                });
+
+                console.log(`Completed palette ${palette.number} with ${colisList.length} colis`);
+              } catch (error) {
+                console.error(`Failed to process palette ${palette.number}:`, error);
+                processedPalettes.push({
+                  ...palette,
+                  error: error.message,
+                  colis: [],
+                  colisCount: 0
+                });
+              }
+            }
+
+            processedExpeditions.push({
+              ...expedition,
+              tourneeNumber: detailData.tourneeNumber,
+              plombNumber: detailData.plombNumber,
+              palettes: processedPalettes,
+              processedAt: new Date().toISOString()
             });
+
+            processedCount++;
+
+            // Return to list page between expeditions
+            await navigateWithRetry(originalUrl);
+
+            // Add delay between expeditions
+            if (processedCount < validExpeditions.length) {
+              await new Promise(r => setTimeout(r, config.betweenExpeditionDelay));
+            }
+
           } catch (error) {
-            console.error("Failed to process palette:", palette.number, error);
+            console.error(`Failed to process expedition ${expedition.number}:`, error);
+            processedExpeditions.push({
+              ...expedition,
+              error: error.message,
+              palettes: []
+            });
           }
         }
 
-        processedExpeditions.push({
-          ...expedition,
-          tourneeNumber: detailData.tourneeNumber,
-          plombNumber: detailData.plombNumber,
-          palettes: processedPalettes,
+        // --- FINALIZE PROCESSING ---
+        console.log("Processing complete, saving results...");
+        await chrome.storage.local.set({
+          expeditions: processedExpeditions,
+          lastExport: new Date().toISOString()
         });
 
-        // Return to list page between expeditions
+        await generateExcel();
+        console.log("Export completed successfully");
+
+      } catch (error) {
+        console.error("Export failed:", error);
         await navigateWithRetry(originalUrl);
+        alert(`Export failed: ${error.message}`);
+        throw error;
       }
-
-      // 4. Final cleanup
-      await navigateWithRetry(originalUrl);
-      await chrome.storage.local.set({ expeditions: processedExpeditions });
-      await generateExcel();
-
-    } catch (error) {
-      console.error("Export failed:", error);
-      await navigateWithRetry(originalUrl);
-      alert(`Export failed: ${error.message}`);
     }
+
+    // Execute the main process
+    await processExpeditions();
   });
 
   function formatDateForFilename(date = new Date()) {
@@ -251,23 +335,11 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById('exportRefused').addEventListener('click', async () => {
     try {
-      // Get current date in DD/MM/YYYY format (same format used in storage)
-      const today = new Date();
-      const todayFormatted = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
-
       // Get all refused colis from storage
       const { refusedColis = [] } = await chrome.storage.local.get({ refusedColis: [] });
 
-      // Filter to only include today's data
-      const todayRefusedColis = refusedColis.filter(item => item.date === todayFormatted);
-
-      if (todayRefusedColis.length === 0) {
-        alert('Aucune donnée à exporter pour aujourd\'hui !');
-        return;
-      }
-
       // Prepare data for export
-      const cleanData = todayRefusedColis.map(item => ({
+      const cleanData = refusedColis.map(item => ({
         Date: item.date,
         Colis: item.colis,
         "Raison Annulation": item.raisonAnnulation,
@@ -315,8 +387,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       const dateString = formatDateForFilename();
       XLSX.writeFile(wb, `Colis_refusés_${dateString}.xlsx`);
 
+      await chrome.storage.local.remove('refusedColis');
+
       // Success notification
-      alert(`Exportation réussie: ${todayRefusedColis.length} colis refusés exportés pour aujourd'hui`);
+      console.log(`Exportation réussie: ${refusedColis.length} colis refusés exportés pour aujourd'hui`);
     } catch (error) {
       console.error('Export échoué:', error);
       alert(`Erreur: ${error.message}`);

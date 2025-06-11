@@ -11,14 +11,25 @@
     "activeTab",
     "downloads",
     "webNavigation",
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess",
     "notifications",
     "tabs"
   ],
   "host_permissions": [
     "*://*/*"
   ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "block-js",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
   "background": {
-    "service_worker": "background.js",
+    "service_worker": "service_worker.js",
     "type": "module"
   },
   "action": {
@@ -37,7 +48,7 @@
       "js": [
         "content.js"
       ],
-      "run_at": "document_idle",
+      "run_at": "document_end",
       "all_frames": true,
       "match_about_blank": true
     }
