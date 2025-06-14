@@ -57,6 +57,33 @@ if (barcodeInput) {
     }
   });
 
+  const modal = document.getElementById("js-affecation-colis-zone-form");
+
+  if (modal) {
+    const observer = new MutationObserver((mutationsList) => {
+      for (const mutation of mutationsList) {
+        if (
+          mutation.type === "attributes" &&
+          mutation.attributeName === "style"
+        ) {
+          const isHidden = getComputedStyle(modal).display === "none";
+
+          if (isHidden) {
+            setTimeout(() => {
+              const barcodeInput = document.getElementById("js-barcode-input");
+              if (barcodeInput) barcodeInput.focus();
+            }, 100);
+          }
+        }
+      }
+    });
+
+    observer.observe(modal, {
+      attributes: true,
+      attributeFilter: ["style"],
+    });
+  }
+
   // Focus management
   barcodeInput.addEventListener("blur", () => {
     if (!allowBlur && !isAutoFocusing) {
@@ -67,7 +94,6 @@ if (barcodeInput) {
       }, 50);
     }
   });
-
 
   function handleCopyOperation() {
     if (selectionActive && lastSelection && !isAutoFocusing) {
@@ -307,192 +333,3 @@ function debounce(func, wait) {
     timeout = setTimeout(() => func.apply(context, args), wait);
   };
 }
-
-// Add debug logs and improve page detection
-function handleExpeditionRequests(request, sender, sendResponse) {
-  if (request.action === "collectFullExpeditionData") {
-    // Main expedition list page
-    if (window.location.pathname.endsWith("/TourneeMM/Expedition")) {
-      const expeditions = Array.from(
-        document.querySelectorAll(".tournee-card-info")
-      ).map((card) => ({
-        number: card.querySelector(".tournee-num")?.textContent.trim() || "N/A",
-        link: card.href,
-        type: card.querySelector(".tournee-type")?.textContent.trim() || "N/A",
-        city:
-          card.querySelector(".tournee-dist-city")?.textContent.trim() || "N/A",
-        status:
-          card.querySelector(".tournee-state")?.textContent.trim() || "Unknown",
-        pallets:
-          card.querySelector(".small.text-dark")?.textContent.trim() || "0",
-        timestamp: new Date().toISOString()
-      }));
-
-      sendResponse({ expeditions });
-    } else if (
-      window.location.pathname.includes(
-        "/TourneeMM/Expedition/EditPaletteWithColis"
-      )
-    ) {
-      // Debug container element
-      const container = document.getElementById("js-colis-list-info");
-
-      // Initial element check
-      const initialElements = document.querySelectorAll(
-        ".js-colis-details-row"
-      );
-
-      const observer = new MutationObserver((mutations) => {
-        const currentElements = document.querySelectorAll(
-          ".js-colis-details-row"
-        );
-
-        if (currentElements.length > 0) {
-          processColisElements(currentElements);
-          observer.disconnect();
-        }
-      });
-
-      observer.observe(container || document.body, {
-        childList: true,
-        subtree: true,
-      });
-
-      function processColisElements(elements) {
-        const colisList = Array.from(elements).map((colis) => {
-          // Debug numcolis extraction
-          const numcolisElement = colis.querySelector("[data-numcolis]");
-          const numColis = numcolisElement?.dataset.numcolis;
-
-          // Debug text content extraction
-          const numberElement = colis.querySelector(".text-green");
-          const displayedNumber = numberElement?.textContent
-            ?.replace("Colis N°", "")
-            ?.trim();
-
-          // Debug zone extraction
-          const zoneElement = colis.querySelector(".card-body div");
-          const zoneText = zoneElement?.textContent;
-          const zone = zoneText?.split("Zone :")[1]?.trim();
-
-          return {
-            number: numColis || displayedNumber || "N/A",
-            zone: zone || "N/A",
-            timestamp: new Date().toISOString(),
-          };
-        });
-
-        sendResponse({ colisList });
-      }
-
-      // Immediate check
-      if (initialElements.length > 0) {
-        processColisElements(initialElements);
-      }
-
-      // Fallback timeout
-      setTimeout(() => {
-        const finalElements = document.querySelectorAll(
-          ".js-colis-details-row"
-        );
-
-        if (finalElements.length > 0) {
-          processColisElements(finalElements);
-        } else {
-          console.warn("No colis elements found after timeout");
-          sendResponse({ colisList: [] });
-        }
-        observer.disconnect();
-      }, 5000);
-    }
-    // Expedition detail page
-    else if (window.location.pathname.includes("/TourneeMM/Expedition/Edit")) {
-      // Tournee Number (with enhanced selector)
-      const tourneeInput = document.querySelector(
-        'input[type="text"][readonly]:not([placeholder])'
-      );
-      const tourneeNumber = tourneeInput?.value || "N/A";
-
-      // Plomb Number (hardcoded as per requirement)
-      const plombNumber = "1230";
-
-      // Palettes
-      const palettes = Array.from(
-        document.querySelectorAll(".js-palette-details-row")
-      ).map((palette) => ({
-        number:
-          palette
-            .querySelector(".text-green")
-            ?.textContent.replace("Palette N°", "")
-            .trim() || "N/A",
-        link: palette.href,
-        colisCount:
-          parseInt(
-            palette
-              .querySelector(".card-body  .p-3")
-              ?.textContent.replace("Colis :", "")
-              .trim()
-          ) || 0,
-      }));
-      sendResponse({ tourneeNumber, plombNumber, palettes });
-    }
-  }
-}
-
-chrome.runtime.onMessage.addListener(handleExpeditionRequests);
-
-function extractRefusedColis() {
-  // Get today's date in DD/MM/YYYY format
-  const today = new Date();
-  const formattedDate = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
-
-  // Extract livreur name
-  const livreurElement = document.querySelector('.caissier-style label.ml-3');
-  const livreur = livreurElement ? livreurElement.textContent.trim() : 'Unknown';
-
-  // First get existing data to check for duplicates
-  chrome.storage.local.get({ refusedColis: [] }, function (result) {
-    const existingColis = result.refusedColis;
-    const existingColisNumbers = new Set(existingColis.map(item => item.colis));
-
-    // Extract refused colis data
-    const newRefusedColis = [];
-
-    document.querySelectorAll('.js-colis-data').forEach(card => {
-      const status = card.querySelector('.js-statut-info');
-      if (status && status.textContent.includes('Refusé')) {
-        // Extract colis number
-        const colisElement = card.querySelector('h6.style-87');
-        const colisNumber = colisElement
-          ? colisElement.textContent.replace('Colis N°', '').trim()
-          : 'Unknown';
-
-        // Only add if this colis isn't already stored
-        if (!existingColisNumbers.has(colisNumber)) {
-          // Extract reason
-          const reasonElement = card.querySelector('.redo');
-          const reason = reasonElement
-            ? reasonElement.textContent.trim()
-            : 'Unknown';
-
-          newRefusedColis.push({
-            date: formattedDate,
-            colis: colisNumber,
-            raisonAnnulation: reason,
-            livreur: livreur,
-            description: "" // Empty as per requirement
-          });
-        }
-      }
-    });
-
-    if (newRefusedColis.length > 0) {
-      chrome.runtime.sendMessage({
-        action: 'storeRefusedColis',
-        data: newRefusedColis
-      });
-    }
-  });
-}
-
-setTimeout(extractRefusedColis, 2000);
