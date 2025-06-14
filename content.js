@@ -4,7 +4,7 @@ let lastNotificationMessage = null;
 let lastClickTime = 0;
 let clickCount = 0;
 
-
+const modal = document.getElementById("js-affect-livreur-modal");
 const barcodeInput = document.getElementById("js-barcode-input");
 if (barcodeInput) {
   // State variables
@@ -57,33 +57,6 @@ if (barcodeInput) {
     }
   });
 
-  const modal = document.getElementById("js-affecation-colis-zone-form");
-
-  if (modal) {
-    const observer = new MutationObserver((mutationsList) => {
-      for (const mutation of mutationsList) {
-        if (
-          mutation.type === "attributes" &&
-          mutation.attributeName === "style"
-        ) {
-          const isHidden = getComputedStyle(modal).display === "none";
-
-          if (isHidden) {
-            setTimeout(() => {
-              const barcodeInput = document.getElementById("js-barcode-input");
-              if (barcodeInput) barcodeInput.focus();
-            }, 100);
-          }
-        }
-      }
-    });
-
-    observer.observe(modal, {
-      attributes: true,
-      attributeFilter: ["style"],
-    });
-  }
-
   // Focus management
   barcodeInput.addEventListener("blur", () => {
     if (!allowBlur && !isAutoFocusing) {
@@ -97,9 +70,10 @@ if (barcodeInput) {
 
   function handleCopyOperation() {
     if (selectionActive && lastSelection && !isAutoFocusing) {
-      navigator.clipboard.writeText(lastSelection)
+      navigator.clipboard
+        .writeText(lastSelection)
         .then(() => {
-          showToast("Copié !", { type: 'success', duration: 800 });
+          showToast("Copié !", { type: "success", duration: 800 });
           selectionActive = false;
           setTimeout(() => {
             isAutoFocusing = true;
@@ -107,9 +81,9 @@ if (barcodeInput) {
             isAutoFocusing = false;
           }, 200);
         })
-        .catch(err => {
+        .catch((err) => {
           console.error("Copy failed:", err);
-          showToast("Échec de la copie", { type: 'error', duration: 1500 });
+          showToast("Échec de la copie", { type: "error", duration: 1500 });
         });
     }
   }
@@ -125,8 +99,8 @@ if (barcodeInput) {
     }
   });
 
-  barcodeInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
+  barcodeInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
       lastNotificationMessage = null;
 
       setTimeout(() => {
@@ -139,9 +113,9 @@ if (barcodeInput) {
   function showToast(message, options = {}) {
     // Default options
     const {
-      type = 'info', // 'info', 'success', 'error', 'warning'
+      type = "info", // 'info', 'success', 'error', 'warning'
       duration = 2000,
-      position = 'bottom-right'
+      position = "bottom-right",
     } = options;
 
     // Add to queue
@@ -167,7 +141,7 @@ if (barcodeInput) {
       info: "#2196F3",
       success: "#4CAF50",
       error: "#F44336",
-      warning: "#FFC107"
+      warning: "#FFC107",
     };
 
     // Remove current toast if exists
@@ -181,13 +155,13 @@ if (barcodeInput) {
     currentToast = document.createElement("div");
 
     // Simple notification style for copy feedback
-    if (type === 'success' && message === "Copié !") {
+    if (type === "success" && message === "Copié !") {
       currentToast.textContent = message;
       Object.assign(currentToast.style, {
         backgroundColor: colors.success,
         padding: "12px 24px",
         borderRadius: "8px",
-        boxShadow: "0 2px 10px rgba(0,0,0,0.2)"
+        boxShadow: "0 2px 10px rgba(0,0,0,0.2)",
       });
     }
     // Detailed notification style for other messages
@@ -206,7 +180,7 @@ if (barcodeInput) {
         borderRadius: "10px",
         backdropFilter: "blur(5px)",
         maxWidth: "320px",
-        wordBreak: "break-word"
+        wordBreak: "break-word",
       });
     }
 
@@ -220,18 +194,18 @@ if (barcodeInput) {
       opacity: "0",
       transition: "opacity 0.3s ease, transform 0.3s ease",
       zIndex: "10000",
-      transform: "translateY(20px)"
+      transform: "translateY(20px)",
     });
 
     // Position styles
     switch (position) {
-      case 'top-right':
+      case "top-right":
         Object.assign(currentToast.style, { top: "24px", right: "12px" });
         break;
-      case 'top-left':
+      case "top-left":
         Object.assign(currentToast.style, { top: "24px", left: "12px" });
         break;
-      case 'bottom-left':
+      case "bottom-left":
         Object.assign(currentToast.style, { bottom: "24px", left: "12px" });
         break;
       default: // bottom-right
@@ -261,6 +235,27 @@ if (barcodeInput) {
   }
 }
 
+if (barcodeInput && modal) {
+  const observer = new MutationObserver(() => {
+    const backdrop = document.querySelector(".modal-backdrop");
+    if (!backdrop) {
+      // Backdrop is gone, focus input
+      setTimeout(() => {
+        barcodeInput.focus();
+      }, 50); // Short delay to ensure it's really gone
+      observer.disconnect(); // Stop observing
+    }
+  });
+
+  modal.addEventListener("hidden.bs.modal", () => {
+    // Start watching for backdrop removal from the body
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  });
+}
+
 // Notification check logic
 function checkForNotification() {
   if (notificationCooldown) return;
@@ -283,12 +278,12 @@ function checkForNotification() {
     }
   }
 
-  const reasonElements = document.querySelectorAll('.text-red.txt-zone-l99');
-  let cancellationReason = 'Raison non spécifiée';
+  const reasonElements = document.querySelectorAll(".text-red.txt-zone-l99");
+  let cancellationReason = "Raison non spécifiée";
 
   for (const el of reasonElements) {
-    if (el.textContent.includes('Motif:')) {
-      cancellationReason = el.textContent.replace('Motif:', '').trim();
+    if (el.textContent.includes("Motif:")) {
+      cancellationReason = el.textContent.replace("Motif:", "").trim();
       break;
     }
   }
@@ -298,7 +293,8 @@ function checkForNotification() {
   if (refusedFound) {
     currentMessage = "Attention : Ce colis a été annulé: " + cancellationReason;
   } else if (assignCount === 2) {
-    currentMessage = "Attention : 2 fois « Assignée Livreur » – veuillez procéder au cachet du colis « 3 tentatives »";
+    currentMessage =
+      "Attention : 2 fois « Assignée Livreur » – veuillez procéder au cachet du colis « 3 tentatives »";
   } else if (assignCount >= 3) {
     currentMessage = `Attention : Assignée Livreur ${assignCount} fois – veuillez procéder à annuler ce colis`;
   }
@@ -306,8 +302,8 @@ function checkForNotification() {
   // Only show if it's a new message
   if (currentMessage && currentMessage !== lastNotificationMessage) {
     showToast(currentMessage, {
-      type: refusedFound ? 'error' : assignCount >= 3 ? 'error' : 'warning',
-      duration: 2000
+      type: refusedFound ? "error" : assignCount >= 3 ? "error" : "warning",
+      duration: 2000,
     });
     lastNotificationMessage = currentMessage;
     notificationCooldown = true;
@@ -322,13 +318,14 @@ observer.observe(document.body, {
   childList: true,
   subtree: true,
   attributes: false,
-  characterData: false
+  characterData: false,
 });
 
 function debounce(func, wait) {
   let timeout;
   return function () {
-    const context = this, args = arguments;
+    const context = this,
+      args = arguments;
     clearTimeout(timeout);
     timeout = setTimeout(() => func.apply(context, args), wait);
   };
