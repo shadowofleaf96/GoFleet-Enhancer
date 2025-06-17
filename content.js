@@ -496,3 +496,59 @@ function extractRefusedColis() {
 }
 
 setTimeout(extractRefusedColis, 2000);
+
+function printAllRetourTicketsWithIframes() {
+  const allRows = document.querySelectorAll("tr");
+  const printUrls = [];
+
+  allRows.forEach(row => {
+    const statusCell = row.querySelector("td:nth-child(6) p");
+    if (statusCell && statusCell.textContent.includes("Affecté livreur")) {
+      const printBtn = row.querySelector("a[href*='PrintRetourTicket']");
+      if (printBtn) {
+        const printUrl = printBtn.href.startsWith("http")
+          ? printBtn.href
+          : `https://tms.marjanemall.ma${printBtn.getAttribute("href")}`;
+        printUrls.push(printUrl);
+      }
+    }
+  });
+
+  console.log(`🔍 Found ${printUrls.length} retour tickets...`);
+
+  let index = 0;
+
+  function loadAndPrintNext() {
+    if (index >= printUrls.length) return;
+
+    const iframe = document.createElement("iframe");
+    iframe.style.display = "none";
+    iframe.src = printUrls[index];
+
+    iframe.onload = () => {
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+        console.log(`🖨️ Printed: ${ printUrls[index]}`);
+      } catch (e) {
+        console.warn("⚠️ Cannot print iframe:", e);
+      }
+
+      setTimeout(() => {
+        iframe.remove();
+        index++;
+        loadAndPrintNext();
+      }, 4000);
+    };
+
+    document.body.appendChild(iframe);
+  }
+
+  loadAndPrintNext();
+}
+
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.action === "printRetourIframes") {
+    printAllRetourTicketsWithIframes();
+  }
+});
