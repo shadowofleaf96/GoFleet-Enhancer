@@ -529,7 +529,7 @@ function printAllRetourTicketsWithIframes() {
       try {
         iframe.contentWindow.focus();
         iframe.contentWindow.print();
-        console.log(`🖨️ Printed: ${ printUrls[index]}`);
+        alert(`🖨️ Printed: ${printUrls[index]}`);
       } catch (e) {
         console.warn("⚠️ Cannot print iframe:", e);
       }
