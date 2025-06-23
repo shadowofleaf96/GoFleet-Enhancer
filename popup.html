@@ -28,7 +28,6 @@
     .container {
       width: 100%;
       max-width: 1024px;
-      /* Increased width */
       background: white;
       border-radius: 20px;
       box-shadow: 0 15px 50px rgba(0, 0, 0, 0.1);
@@ -53,12 +52,13 @@
     .header {
       text-align: center;
       padding: 40px 30px 25px;
+      margin: 5px 5px 5px 5px;
       position: relative;
     }
 
     .logo-container {
-      width: 80px;
-      height: 80px;
+      width: 60px;
+      height: 60px;
       background: white;
       border-radius: 50%;
       display: flex;
@@ -69,15 +69,15 @@
     }
 
     .logo {
-      font-size: 36px;
+      font-size: 24px;
       color: #4a6cf7;
     }
 
     .title {
-      font-size: 24px;
+      font-size: 18px;
       font-weight: 700;
       color: white;
-      margin-bottom: 8px;
+      margin-bottom: 4px;
     }
 
     .content {
@@ -132,8 +132,14 @@
       transform: translateY(0);
     }
 
-    #exportEchec {
+    #exportEchecCasa {
+      margin-right: 6px;
       background: linear-gradient(135deg, #FF6B6B, #FF8E53);
+    }
+
+    #exportEchecHorsCasa {
+      margin-left: 6px;
+      background: linear-gradient(135deg, #FF6A5B, #FF3653);
     }
 
     #exportRefused {
@@ -241,22 +247,42 @@
 
     <div class="content">
       <div class="buttons-container">
-        <button class="downloadButton" id="exportEchec">
-          <div class="button-content">
-            <div class="icon-container">
-              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                <path
-                  d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" />
-                <path d="M14 2V8H20M12 18V12M9 15H15" />
-              </svg>
+        <div style="display: flex;">
+          <!-- CASA Button -->
+          <button class="downloadButton" id="exportEchecCasa">
+            <div class="button-content">
+              <div class="icon-container">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path
+                    d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" />
+                  <path d="M14 2V8H20M12 18V12M9 15H15" />
+                </svg>
+              </div>
+              <div class="button-text">
+                <div class="button-main-text">Échecs de Casa</div>
+                <div class="button-sub-text">Exporter les colis en échec à Casablanca</div>
+              </div>
             </div>
-            <div class="button-text">
-              <div class="button-main-text">Échecs de Livraison et Retours</div>
-              <div class="button-sub-text">Exporter les colis en échec et retournés</div>
-            </div>
-          </div>
-        </button>
+          </button>
 
+          <!-- Hors Casa Button -->
+          <button class="downloadButton" id="exportEchecHorsCasa">
+            <div class="button-content">
+              <div class="icon-container">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path
+                    d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" />
+                  <path d="M14 2V8H20M12 18V12M9 15H15" />
+                </svg>
+              </div>
+              <div class="button-text">
+                <div class="button-main-text">Échecs Hors Casa</div>
+                <div class="button-sub-text">Exporter les colis en échec hors Casablanca</div>
+              </div>
+            </div>
+          </button>
+        </div>
+        <!-- Refused Button -->
         <button class="downloadButton" id="exportRefused">
           <div class="button-content">
             <div class="icon-container">
@@ -273,6 +299,7 @@
           </div>
         </button>
 
+        <!-- Print Button -->
         <button class="downloadButton" id="printRetour">
           <div class="button-content">
             <div class="icon-container">
