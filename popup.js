@@ -416,7 +416,7 @@ document.addEventListener("DOMContentLoaded", async () => {
                 });
 
                 await generateExcel();
-                console.log("Export completed successfully");
+                console.log("Exportation terminé pour Zone CASA");
 
             } catch (error) {
                 console.error("Export failed:", error);
@@ -556,12 +556,12 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         if (completed === 4) {
             await generateExcelHorsCasa();
-            alert("Export terminé pour toutes les villes hors Casa !");
+            alert("Exportation terminé pour toutes les Zones hors CASA !");
         } else {
             alert(`Ville ${city.toUpperCase()} terminée. Passez à la suivante.`);
         }
     });
-    
+
     function formatDateForFilename(date = new Date()) {
         const day = String(date.getDate()).padStart(2, '0');
         const month = String(date.getMonth() + 1).padStart(2, '0');
