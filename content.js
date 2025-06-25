@@ -308,6 +308,24 @@ function debounce(func, wait) {
   };
 }
 
+function detectCurrentCity() {
+  const hubText = document.querySelector(".user-top-btn .ml-2")?.textContent || "";
+  const normalized = hubText.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+
+  if (normalized.includes("FES")) return "fes";
+  if (normalized.includes("TANGER")) return "tanger";
+  if (normalized.includes("RABAT")) return "rabat";
+  if (normalized.includes("MEKNES")) return "meknes";
+  return "unknown";
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.action === "detectCity") {
+    const city = detectCurrentCity();
+    sendResponse({ city });
+  }
+});
+
 // Add debug logs and improve page detection
 function handleExpeditionRequests(request, sender, sendResponse) {
   if (request.action === "collectFullExpeditionData") {

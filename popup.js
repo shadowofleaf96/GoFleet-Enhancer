@@ -85,8 +85,108 @@ async function generateExcel() {
         document.body.appendChild(a);
         a.click();
 
-        // Remove expeditions after successful export
         await chrome.storage.local.remove("expeditions");
+
+        setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }, 100);
+    } catch (error) {
+        console.error("Excel generation failed:", error);
+        alert("Erreur de génération Excel: " + error.message);
+    }
+}
+
+async function generateExcelHorsCasa() {
+    try {
+        const cities = ["tanger", "meknes", "fes", "rabat"];
+        const storedData = await chrome.storage.local.get(
+            cities.map((c) => `expeditions_${c}`)
+        );
+
+        const templatePath = chrome.runtime.getURL(
+            "dummy-content/ECHEC-RETOUR_CLIENT-HORS-ZONE.xlsx"
+        );
+        const templateBuffer = await fetch(templatePath).then((r) =>
+            r.arrayBuffer()
+        );
+        const workbook = await XlsxPopulate.fromDataAsync(templateBuffer);
+
+        function formatDate(date = new Date()) {
+            const month = `${date.getMonth() + 1}`.padStart(2, "0");
+            const day = `${date.getDate()}`.padStart(2, "0");
+            const year = date.getFullYear();
+            return `${year}-${month}-${day}`;
+        }
+
+        // Function to fill a given sheet
+        const updateSheet = (sheetName, data) => {
+            const sheet = workbook.sheet(sheetName);
+            sheet.cell("I2").value(formatDate());
+
+            let startRow = 12;
+            data.forEach((item) => {
+                sheet.cell("J4").value(item.expeditionNumber);
+                sheet.cell("J5").value(item.tourneeNumber);
+                sheet.cell("J9").value(item.colisCount);
+
+                ["A", "B", "C", "D", "E"].forEach((col) => {
+                    sheet.cell(`${col}${startRow}`).value(item.paletteNumber);
+                });
+
+                // Clear and fill colis numbers
+                const cols = ["F", "G", "H"];
+                for (const col of cols) {
+                    for (let row = startRow; row <= 29; row++) {
+                        sheet.cell(`${col}${row}`).clear();
+                    }
+                }
+
+                let colisIndex = 0;
+                for (const col of cols) {
+                    for (let row = startRow; row <= 29; row++) {
+                        if (colisIndex < item.colis.length) {
+                            const colis = item.colis[colisIndex];
+                            sheet.cell(`${col}${row}`).value(colis.number);
+                            colisIndex++;
+                        }
+                    }
+                }
+            });
+        };
+
+        // Iterate through cities
+        for (const city of cities) {
+            const expeditions = storedData[`expeditions_${city}`] || [];
+
+            const processData = (suffix) =>
+                expeditions.flatMap((exp) =>
+                    exp.palettes
+                        .filter((p) => p.number.endsWith(suffix))
+                        .map((p) => ({
+                            paletteNumber: p.number,
+                            expeditionNumber: exp.number.replace("N° ", ""),
+                            tourneeNumber: exp.tourneeNumber,
+                            colisCount: p.colisCount,
+                            colis: p.colis,
+                        }))
+                );
+
+            updateSheet(`ECHEC ${city.toUpperCase()}`, processData("001"));
+            updateSheet(`RTC ${city.toUpperCase()}`, processData("002"));
+        }
+
+        const blob = await workbook.outputAsync("blob");
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `ECHEC-RETOUR_CLIENT-HORS-ZONE_${formatDate()}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+
+        await chrome.storage.local.remove(
+            cities.map((c) => `expeditions_${c}`)
+        );
 
         setTimeout(() => {
             document.body.removeChild(a);
@@ -103,6 +203,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         chrome.tabs.sendMessage(tab.id, { action: "printRetourIframes" });
     });
+
     document.getElementById("exportEchecCasa").addEventListener("click", async () => {
         const [tab] = await chrome.tabs.query({
             active: true,
@@ -329,6 +430,138 @@ document.addEventListener("DOMContentLoaded", async () => {
         await processExpeditions();
     });
 
+    document.getElementById("exportEchecHorsCasa").addEventListener("click", async () => {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const { city } = await chrome.tabs.sendMessage(tab.id, { action: "detectCity" });
+
+        if (!["tanger", "meknes", "fes", "rabat"].includes(city)) {
+            alert("City not recognized or not supported.");
+            return;
+        }
+
+        const originalUrl = tab.url;
+        let currentUrl = originalUrl;
+
+        const config = {
+            navigationTimeout: 5000,
+            retryDelay: 3000,
+            maxRetries: 5,
+            dataCollectionDelay: 5000,
+            betweenExpeditionDelay: 5000
+        };
+
+        async function navigateWithRetry(url, maxAttempts = config.maxRetries) {
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                try {
+                    await chrome.tabs.update(tab.id, { url });
+                    await new Promise((resolve, reject) => {
+                        const timeout = setTimeout(() => reject(new Error(`Navigation timeout for ${url}`)), config.navigationTimeout);
+                        const checkComplete = async () => {
+                            const newUrl = (await chrome.tabs.get(tab.id)).url;
+                            if (newUrl === url) {
+                                clearTimeout(timeout);
+                                resolve();
+                            }
+                        };
+                        const interval = setInterval(checkComplete, 500);
+                    });
+                    await new Promise(r => setTimeout(r, config.dataCollectionDelay));
+                    return true;
+                } catch (error) {
+                    console.warn(`Navigation attempt ${attempt} failed:`, error);
+                    if (attempt === maxAttempts) throw error;
+                    await new Promise(r => setTimeout(r, attempt * config.retryDelay));
+                }
+            }
+        }
+
+        async function processPalette(palette, expedition) {
+            const paletteUrl = new URL(palette.link, expedition.link).href;
+            await navigateWithRetry(paletteUrl);
+
+            let colisData;
+            for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
+                try {
+                    colisData = await chrome.tabs.sendMessage(tab.id, {
+                        action: "collectFullExpeditionData",
+                    });
+                    if (colisData?.colisList?.length) break;
+                    throw new Error("Empty or invalid colis data");
+                } catch (error) {
+                    console.warn(`Attempt ${attempt} failed for palette ${palette.number}:`, error);
+                    if (attempt === config.maxRetries) throw error;
+                    await new Promise(r => setTimeout(r, attempt * config.retryDelay));
+                }
+            }
+
+            await navigateWithRetry(expedition.link);
+            return colisData.colisList;
+        }
+
+        async function runExportLogic(tab, city) {
+            const initialData = await chrome.tabs.sendMessage(tab.id, { action: "collectFullExpeditionData" });
+
+            if (!initialData?.expeditions) throw new Error("No expedition data found on the initial page");
+
+            const allowedStatuses = ["en cours de creation", "en cours d'expedition mm"];
+            const validExpeditions = initialData.expeditions.filter(exp => {
+                const cleanedStatus = exp.status.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[’‘`´]/g, "'").toLowerCase().trim();
+                return allowedStatuses.includes(cleanedStatus);
+            });
+
+            const processedExpeditions = [];
+            for (const expedition of validExpeditions) {
+                try {
+                    await navigateWithRetry(expedition.link);
+                    const detailData = await chrome.tabs.sendMessage(tab.id, { action: "collectFullExpeditionData" });
+                    const processedPalettes = [];
+
+                    for (const palette of detailData.palettes || []) {
+                        try {
+                            const colisList = await processPalette(palette, expedition);
+                            processedPalettes.push({ ...palette, colis: colisList, colisCount: colisList.length });
+                        } catch (error) {
+                            processedPalettes.push({ ...palette, error: error.message, colis: [], colisCount: 0 });
+                        }
+                    }
+
+                    processedExpeditions.push({
+                        ...expedition,
+                        tourneeNumber: detailData.tourneeNumber,
+                        plombNumber: detailData.plombNumber,
+                        palettes: processedPalettes,
+                    });
+
+                    await navigateWithRetry(originalUrl);
+                    await new Promise(r => setTimeout(r, config.betweenExpeditionDelay));
+
+                } catch (error) {
+                    console.error(`Failed to process expedition ${expedition.number}:`, error);
+                    processedExpeditions.push({ ...expedition, error: error.message, palettes: [] });
+                }
+            }
+
+            return processedExpeditions;
+        }
+
+        const collectedData = await runExportLogic(tab, city);
+        const storageKey = `expeditions_${city}`;
+        await chrome.storage.local.set({ [storageKey]: collectedData });
+
+        const keys = await chrome.storage.local.get([
+            "expeditions_tanger", "expeditions_meknes", "expeditions_fes", "expeditions_rabat"
+        ]);
+
+        const completed = Object.values(keys).filter(Boolean).length;
+
+        if (completed === 4) {
+            await generateExcelHorsCasa();
+            alert("Export terminé pour toutes les villes hors Casa !");
+        } else {
+            alert(`Ville ${city.toUpperCase()} terminée. Passez à la suivante.`);
+        }
+    });
+    
     function formatDateForFilename(date = new Date()) {
         const day = String(date.getDate()).padStart(2, '0');
         const month = String(date.getMonth() + 1).padStart(2, '0');
