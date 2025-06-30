@@ -53,9 +53,9 @@ async function generateExcel() {
                     sheet.cell(`${col}12`).value(item.paletteNumber);
                 });
 
-                const cols = ["F", "G", "H"];
+                const cols = ["F", "G", "H", "I", "J"];
                 for (const col of cols) {
-                    for (let row = 12; row <= 29; row++) {
+                    for (let row = 12; row <= 30; row++) {
                         const cell = sheet.cell(`${col}${row}`);
                         cell.clear();
                     }
@@ -63,7 +63,7 @@ async function generateExcel() {
 
                 let colisIndex = 0;
                 for (const col of cols) {
-                    for (let row = 12; row <= 29; row++) {
+                    for (let row = 12; row <= 30; row++) {
                         if (colisIndex < item.colis.length) {
                             const colis = item.colis[colisIndex];
                             sheet.cell(`${col}${row}`).value(colis.number);
@@ -134,17 +134,16 @@ async function generateExcelHorsCasa() {
                     sheet.cell(`${col}${startRow}`).value(item.paletteNumber);
                 });
 
-                // Clear and fill colis numbers
-                const cols = ["F", "G", "H"];
+                const cols = ["F", "G", "H", "I", "J"];
                 for (const col of cols) {
-                    for (let row = startRow; row <= 29; row++) {
+                    for (let row = startRow; row <= 30; row++) {
                         sheet.cell(`${col}${row}`).clear();
                     }
                 }
 
                 let colisIndex = 0;
                 for (const col of cols) {
-                    for (let row = startRow; row <= 29; row++) {
+                    for (let row = startRow; row <= 30; row++) {
                         if (colisIndex < item.colis.length) {
                             const colis = item.colis[colisIndex];
                             sheet.cell(`${col}${row}`).value(colis.number);
