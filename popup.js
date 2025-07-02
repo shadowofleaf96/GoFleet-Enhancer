@@ -105,7 +105,7 @@ async function generateExcelHorsCasa() {
         );
 
         const templatePath = chrome.runtime.getURL(
-            "dummy-content/ECHEC-RETOUR_CLIENT-HORS-ZONE.xlsx"
+            "dummy-content/ECHEC-RETOUR_CLIENT-HORS-CASA.xlsx"
         );
         const templateBuffer = await fetch(templatePath).then((r) =>
             r.arrayBuffer()
