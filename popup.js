@@ -179,7 +179,7 @@ async function generateExcelHorsCasa() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `ECHEC-RETOUR_CLIENT-HORS-ZONE_${formatDate()}.xlsx`;
+        a.download = `ECHEC-RETOUR_CLIENT-HORS-CASA_${formatDate()}.xlsx`;
         document.body.appendChild(a);
         a.click();
 
