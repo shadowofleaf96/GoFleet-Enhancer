@@ -7,26 +7,22 @@ let clickCount = 0;
 const modal = document.getElementById("js-affect-livreur-modal");
 const barcodeInput = document.getElementById("js-barcode-input");
 if (barcodeInput) {
-  // State variables
   let allowBlur = false;
   let selectionActive = false;
   let lastSelection = "";
   let isAutoFocusing = false;
 
-  // Toast system variables
   let toastHideTimeout = null;
   let currentToast = null;
   let toastQueue = [];
   let isToastActive = false;
 
-  // Initialize focus
   setTimeout(() => {
     isAutoFocusing = true;
     barcodeInput.focus();
     isAutoFocusing = false;
   }, 100);
 
-  // Track selection
   document.addEventListener("selectionchange", () => {
     const selection = window.getSelection();
     const selectedText = selection.toString().trim();
@@ -43,11 +39,9 @@ if (barcodeInput) {
 
     if (clickCount === 1) {
       clickTimeout = setTimeout(() => {
-        // Single click behavior (just selection)
         clickCount = 0;
-      }, 300); // Double-click detection window
+      }, 300);
     } else if (clickCount === 2) {
-      // Double click behavior (copy operation)
       clearTimeout(clickTimeout);
       clickCount = 0;
 
@@ -57,7 +51,6 @@ if (barcodeInput) {
     }
   });
 
-  // Focus management
   barcodeInput.addEventListener("blur", () => {
     if (!allowBlur && !isAutoFocusing) {
       isAutoFocusing = true;
@@ -88,7 +81,6 @@ if (barcodeInput) {
     }
   }
 
-  // Click-outside handler
   document.addEventListener("mousedown", (e) => {
     if (!barcodeInput.contains(e.target)) {
       allowBlur = true;
@@ -109,19 +101,15 @@ if (barcodeInput) {
     }
   });
 
-  // Improved toast notification system with queue
   function showToast(message, options = {}) {
-    // Default options
     const {
-      type = "info", // 'info', 'success', 'error', 'warning'
+      type = "info",
       duration = 2000,
       position = "bottom-right",
     } = options;
 
-    // Add to queue
     toastQueue.push({ message, type, duration, position });
 
-    // If no toast is active, show the next one
     if (!isToastActive) {
       processToastQueue();
     }
@@ -136,7 +124,6 @@ if (barcodeInput) {
     isToastActive = true;
     const { message, type, duration, position } = toastQueue.shift();
 
-    // Color mapping
     const colors = {
       info: "#2196F3",
       success: "#4CAF50",
@@ -144,17 +131,14 @@ if (barcodeInput) {
       warning: "#FFC107",
     };
 
-    // Remove current toast if exists
     if (currentToast) {
       clearTimeout(toastHideTimeout);
       currentToast.remove();
       currentToast = null;
     }
 
-    // Create new toast element
     currentToast = document.createElement("div");
 
-    // Simple notification style for copy feedback
     if (type === "success" && message === "Copié !") {
       currentToast.textContent = message;
       Object.assign(currentToast.style, {
@@ -163,9 +147,7 @@ if (barcodeInput) {
         borderRadius: "8px",
         boxShadow: "0 2px 10px rgba(0,0,0,0.2)",
       });
-    }
-    // Detailed notification style for other messages
-    else {
+    } else {
       currentToast.innerHTML = `
         <div style="display:flex;align-items:center;gap:12px;">
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="${colors[type]}" viewBox="0 0 24 24">
@@ -184,7 +166,6 @@ if (barcodeInput) {
       });
     }
 
-    // Common styles
     Object.assign(currentToast.style, {
       position: "fixed",
       color: "#FFF",
@@ -197,7 +178,6 @@ if (barcodeInput) {
       transform: "translateY(20px)",
     });
 
-    // Position styles
     switch (position) {
       case "top-right":
         Object.assign(currentToast.style, { top: "24px", right: "12px" });
@@ -208,19 +188,17 @@ if (barcodeInput) {
       case "bottom-left":
         Object.assign(currentToast.style, { bottom: "24px", left: "12px" });
         break;
-      default: // bottom-right
+      default:
         Object.assign(currentToast.style, { bottom: "24px", right: "12px" });
     }
 
     document.body.appendChild(currentToast);
 
-    // Animate in
     requestAnimationFrame(() => {
       currentToast.style.opacity = "1";
       currentToast.style.transform = "translateY(0)";
     });
 
-    // Auto-dismiss after delay
     toastHideTimeout = setTimeout(() => {
       currentToast.style.opacity = "0";
       setTimeout(() => {
@@ -228,7 +206,6 @@ if (barcodeInput) {
           currentToast.remove();
           currentToast = null;
         }
-        // Process next toast in queue
         processToastQueue();
       }, 300);
     }, duration);
@@ -239,16 +216,14 @@ if (barcodeInput && modal) {
   const observer = new MutationObserver(() => {
     const backdrop = document.querySelector(".modal-backdrop");
     if (!backdrop) {
-      // Backdrop is gone, focus input
       setTimeout(() => {
         barcodeInput.focus();
-      }, 50); // Short delay to ensure it's really gone
-      observer.disconnect(); // Stop observing
+      }, 50);
+      observer.disconnect();
     }
   });
 
   modal.addEventListener("hidden.bs.modal", () => {
-    // Start watching for backdrop removal from the body
     observer.observe(document.body, {
       childList: true,
       subtree: true,
@@ -256,7 +231,6 @@ if (barcodeInput && modal) {
   });
 }
 
-// Notification check logic
 function checkForNotification() {
   if (notificationCooldown) return;
 
@@ -299,7 +273,6 @@ function checkForNotification() {
     currentMessage = `Attention : Assignée Livreur ${assignCount} fois – veuillez procéder à annuler ce colis`;
   }
 
-  // Only show if it's a new message
   if (currentMessage && currentMessage !== lastNotificationMessage) {
     showToast(currentMessage, {
       type: refusedFound ? "error" : assignCount >= 3 ? "error" : "warning",
@@ -311,7 +284,6 @@ function checkForNotification() {
   }
 }
 
-// Debounce and observe changes
 const debouncedCheck = debounce(checkForNotification, 500);
 const observer = new MutationObserver(debouncedCheck);
 observer.observe(document.body, {
@@ -330,3 +302,30 @@ function debounce(func, wait) {
     timeout = setTimeout(() => func.apply(context, args), wait);
   };
 }
+
+const modalObserver = new MutationObserver(() => {
+  const modalBody = document.getElementById("js-affectation-coliszone-modal-body");
+  if (!modalBody) return;
+
+  const forbiddenImg = modalBody.querySelector('#js-colis-livreur-img[src$="forbidden.png"]');
+  const zoneText = modalBody.querySelector("#js-colis-livreur-zone-name-text");
+  const affectButton = document.getElementById("js-affect-colis-to-zone-btn");
+  console.log("Found button:", affectButton);
+
+  if (
+    forbiddenImg &&
+    zoneText &&
+    zoneText.textContent.includes("Zone Expédition vers l'entrepôt") &&
+    affectButton &&
+    affectButton.style.display !== "none"
+  ) {
+    console.log("🚫 Forbidden zone detected, hiding affect button");
+    affectButton.remove();
+  }
+});
+
+modalObserver.observe(document.body, {
+  childList: true,
+  subtree: true,
+});
+
