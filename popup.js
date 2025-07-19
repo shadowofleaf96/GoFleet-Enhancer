@@ -5,6 +5,57 @@ function formatDate(date = new Date()) {
   return `${day}/${month}/${year}`;
 }
 
+async function generateDeliveryExcel() {
+  try {
+    const { deliveryBoys = [] } = await chrome.storage.local.get("deliveryBoys");
+
+    const templatePath = chrome.runtime.getURL(
+      "dummy-content/MARJANE-MALL-EXPORT-DATA.xlsx"
+    );
+    const templateBuffer = await fetch(templatePath).then((r) => r.arrayBuffer());
+
+    const workbook = await XlsxPopulate.fromDataAsync(templateBuffer);
+    const sheet = workbook.sheet(0);
+
+    function formatDate(date = new Date()) {
+      const d = date;
+      const month = `${d.getMonth() + 1}`.padStart(2, "0");
+      const day = `${d.getDate()}`.padStart(2, "0");
+      const year = d.getFullYear();
+      return `${year}-${month}-${day}`;
+    }
+
+    const startRow = 2;
+
+    deliveryBoys.forEach((entry, index) => {
+      const row = startRow + index;
+      sheet.cell(`A${row}`).value(entry.name);
+      sheet.cell(`B${row}`).value(entry.totalColis);
+      sheet.cell(`C${row}`).value(entry.livree);
+      sheet.cell(`D${row}`).value(entry.nonLivree);
+      sheet.cell(`H${row}`).value(entry.retourRecupere);
+      sheet.cell(`I${row}`).value(entry.retourNonRecupere);
+    });
+
+    const blob = await workbook.outputAsync("blob");
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `EXPORT_LIVREUR_${formatDate()}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 100);
+  } catch (error) {
+    console.error("Excel generation failed:", error);
+    alert("Erreur de génération Excel: " + error.message);
+  }
+}
+
+
 async function generateExcel() {
   try {
     const { expeditions = [] } = await chrome.storage.local.get("expeditions");
@@ -377,8 +428,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           for (const expedition of validExpeditions) {
             try {
               console.log(
-                `Processing expedition ${processedCount + 1}/${
-                  validExpeditions.length
+                `Processing expedition ${processedCount + 1}/${validExpeditions.length
                 }: ${expedition.number}`
               );
 
