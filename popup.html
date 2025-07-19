@@ -1,331 +1,381 @@
 <!DOCTYPE html>
 <html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GoFleet Enhancer</title>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      }
 
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GoFleet Enhancer</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
+      body {
+        background: linear-gradient(135deg, #f5f9fc 0%, #e6f0f7 100%);
+        height: 450px;
+        width: 400px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 20px;
+        color: #2d3748;
+      }
 
-    body {
-      background: linear-gradient(135deg, #f5f9fc 0%, #e6f0f7 100%);
-      height: 450px;
-      width: 400px;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      padding: 20px;
-      color: #2d3748;
-    }
+      .container {
+        width: 100%;
+        max-width: 1024px;
+        background: white;
+        border-radius: 20px;
+        box-shadow: 0 15px 50px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+        position: relative;
+        z-index: 1;
+      }
 
-    .container {
-      width: 100%;
-      max-width: 1024px;
-      background: white;
-      border-radius: 20px;
-      box-shadow: 0 15px 50px rgba(0, 0, 0, 0.1);
-      overflow: hidden;
-      position: relative;
-      z-index: 1;
-    }
+      .container::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 180px;
+        background: linear-gradient(135deg, #4a6cf7 0%, #8e2de2 100%);
+        z-index: -1;
+        border-radius: 0 0 50% 50%;
+        transform: scale(2.5, 1);
+      }
 
-    .container::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 180px;
-      background: linear-gradient(135deg, #4a6cf7 0%, #8e2de2 100%);
-      z-index: -1;
-      border-radius: 0 0 50% 50%;
-      transform: scale(2.5, 1);
-    }
+      .header {
+        text-align: center;
+        padding: 40px 30px 25px;
+        margin: 5px 5px 5px 5px;
+        position: relative;
+      }
 
-    .header {
-      text-align: center;
-      padding: 40px 30px 25px;
-      margin: 5px 5px 5px 5px;
-      position: relative;
-    }
+      .title {
+        font-size: 18px;
+        font-weight: 700;
+        color: white;
+        margin-top: 5em;
+      }
 
-    .logo-container {
-      width: 60px;
-      height: 60px;
-      background: white;
-      border-radius: 50%;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      margin: 0 auto 20px;
-      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
-    }
+      .content {
+        padding: 0 12px 12px;
+      }
 
-    .logo {
-      font-size: 24px;
-      color: #4a6cf7;
-    }
+      .buttons-container {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        margin-bottom: 5px;
+      }
 
-    .title {
-      font-size: 18px;
-      font-weight: 700;
-      color: white;
-      margin-bottom: 4px;
-    }
+      .downloadButton {
+        background: white;
+        color: white;
+        width: 100%;
+        padding: 12px 16px;
+        border: none;
+        border-radius: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+        text-align: left;
+        position: relative;
+        overflow: hidden;
+        z-index: 1;
+      }
 
-    .content {
-      padding: 0 12px 12px;
-    }
+      .downloadButton::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: -1;
+        transition: opacity 0.3s ease;
+        opacity: 1;
+      }
 
-    .buttons-container {
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-      margin-bottom: 5px;
-    }
+      .downloadButton:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 12px 25px rgba(0, 0, 0, 0.15);
+      }
 
-    .downloadButton {
-      background: white;
-      color: white;
-      width: 100%;
-      padding: 12px 16px;
-      border: none;
-      border-radius: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.3s ease;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
-      text-align: left;
-      position: relative;
-      overflow: hidden;
-      z-index: 1;
-    }
+      .downloadButton:active {
+        transform: translateY(0);
+      }
 
-    .downloadButton::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      z-index: -1;
-      transition: opacity 0.3s ease;
-      opacity: 1;
-    }
+      #exportEchecCasa {
+        margin-right: 6px;
+        background: linear-gradient(135deg, #ff6b6b, #ff8e53);
+      }
 
-    .downloadButton:hover {
-      transform: translateY(-3px);
-      box-shadow: 0 12px 25px rgba(0, 0, 0, 0.15);
-    }
+      #exportEchecHorsCasa {
+        margin-left: 6px;
+        background: linear-gradient(135deg, #ff6a5b, #ff3653);
+      }
 
-    .downloadButton:active {
-      transform: translateY(0);
-    }
+      #exportRefused {
+        background: linear-gradient(135deg, #4a90e2, #5d69be);
+      }
 
-    #exportEchecCasa {
-      margin-right: 6px;
-      background: linear-gradient(135deg, #FF6B6B, #FF8E53);
-    }
+      #printRetour {
+        background: linear-gradient(135deg, #28a745, #218838);
+      }
 
-    #exportEchecHorsCasa {
-      margin-left: 6px;
-      background: linear-gradient(135deg, #FF6A5B, #FF3653);
-    }
+      #exportLivreur {
+        background: linear-gradient(135deg, #28a745, #218838);
+      }
 
-    #exportRefused {
-      background: linear-gradient(135deg, #4A90E2, #5D69BE);
-    }
+      .button-content {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
 
-    #printRetour {
-      background: linear-gradient(135deg, #28a745, #218838);
-    }
+      .icon-container {
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 12px;
+        padding: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
 
-    .button-content {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-    }
+      .icon {
+        width: 24px;
+        height: 24px;
+        stroke-width: 2;
+        color: white;
+      }
 
-    .icon-container {
-      background: rgba(255, 255, 255, 0.2);
-      border-radius: 12px;
-      padding: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
+      .button-text {
+        display: flex;
+        flex-direction: column;
+        flex-grow: 1;
+      }
 
-    .icon {
-      width: 24px;
-      height: 24px;
-      stroke-width: 2;
-      color: white;
-    }
+      .button-main-text {
+        font-size: 16px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+      }
 
-    .button-text {
-      display: flex;
-      flex-direction: column;
-      flex-grow: 1;
-    }
+      .button-sub-text {
+        font-size: 13px;
+        font-weight: 400;
+        opacity: 0.9;
+        margin-top: 4px;
+      }
 
-    .button-main-text {
-      font-size: 16px;
-      font-weight: 600;
-      letter-spacing: 0.3px;
-    }
+      #status {
+        padding: 15px;
+        border-radius: 14px;
+        background: white;
+        text-align: center;
+        font-size: 14px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        border: 1px solid #edf2f7;
+        min-height: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.3s ease;
+      }
 
-    .button-sub-text {
-      font-size: 13px;
-      font-weight: 400;
-      opacity: 0.9;
-      margin-top: 4px;
-    }
+      .status-loading {
+        color: #4a6cf7;
+        font-weight: 500;
+      }
 
-    #status {
-      padding: 15px;
-      border-radius: 14px;
-      background: white;
-      text-align: center;
-      font-size: 14px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-      border: 1px solid #edf2f7;
-      min-height: 20px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.3s ease;
-    }
+      .status-success {
+        color: #38a169;
+        background: rgba(56, 161, 105, 0.08);
+        border-color: rgba(56, 161, 105, 0.2);
+      }
 
-    .status-loading {
-      color: #4a6cf7;
-      font-weight: 500;
-    }
+      .status-error {
+        color: #e53e3e;
+        background: rgba(229, 62, 62, 0.08);
+        border-color: rgba(229, 62, 62, 0.2);
+      }
 
-    .status-success {
-      color: #38a169;
-      background: rgba(56, 161, 105, 0.08);
-      border-color: rgba(56, 161, 105, 0.2);
-    }
+      .footer {
+        margin-top: 10px;
+        text-align: center;
+        font-size: 12px;
+        color: #a0aec0;
+        padding-top: 20px;
+        border-top: 1px solid #edf2f7;
+      }
+    </style>
+  </head>
 
-    .status-error {
-      color: #e53e3e;
-      background: rgba(229, 62, 62, 0.08);
-      border-color: rgba(229, 62, 62, 0.2);
-    }
-
-    .footer {
-      margin-top: 10px;
-      text-align: center;
-      font-size: 12px;
-      color: #a0aec0;
-      padding-top: 20px;
-      border-top: 1px solid #edf2f7;
-    }
-  </style>
-</head>
-
-<body>
-  <div class="container">
-    <div class="header">
-      <div class="logo-container">
-        <div class="logo">
-          <i class="fas fa-box-open"></i>
-        </div>
+  <body>
+    <div class="container">
+      <div class="header">
+        <div class="logo-container"></div>
+        <h1 class="title">GoFleet Enhancer</h1>
       </div>
-      <h1 class="title">GoFeet Enhancer</h1>
-    </div>
 
-    <div class="content">
-      <div class="buttons-container">
-        <div style="display: flex;">
-          <!-- CASA Button -->
-          <button class="downloadButton" id="exportEchecCasa">
+      <div class="content">
+        <div class="buttons-container">
+          <div style="display: flex">
+            <button class="downloadButton" id="exportEchecCasa">
+              <div class="button-content">
+                <div class="icon-container">
+                  <svg
+                    class="icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                  >
+                    <path
+                      d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z"
+                    />
+                    <path d="M14 2V8H20M12 18V12M9 15H15" />
+                  </svg>
+                </div>
+                <div class="button-text">
+                  <div class="button-main-text">Échecs de Casa</div>
+                  <div class="button-sub-text">
+                    Exporter les colis en échec à Casablanca
+                  </div>
+                </div>
+              </div>
+            </button>
+
+            <!-- Hors Casa Button -->
+            <button class="downloadButton" id="exportEchecHorsCasa">
+              <div class="button-content">
+                <div class="icon-container">
+                  <svg
+                    class="icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                  >
+                    <path
+                      d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z"
+                    />
+                    <path d="M14 2V8H20M12 18V12M9 15H15" />
+                  </svg>
+                </div>
+                <div class="button-text">
+                  <div class="button-main-text">Échecs Hors Casa</div>
+                  <div class="button-sub-text">
+                    Exporter les colis en échec hors Casablanca
+                  </div>
+                </div>
+              </div>
+            </button>
+          </div>
+          <!-- Refused Button -->
+          <button class="downloadButton" id="exportRefused">
             <div class="button-content">
               <div class="icon-container">
-                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <svg
+                  class="icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                >
                   <path
-                    d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" />
-                  <path d="M14 2V8H20M12 18V12M9 15H15" />
+                    d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z"
+                  />
+                  <path d="M14 2V8H20M9 16L15 10M15 16L9 10" />
                 </svg>
               </div>
               <div class="button-text">
-                <div class="button-main-text">Échecs de Casa</div>
-                <div class="button-sub-text">Exporter les colis en échec à Casablanca</div>
+                <div class="button-main-text">Colis Refusés avec Raison</div>
+                <div class="button-sub-text">
+                  Exporter les colis refusés avec la raison d'annulation
+                </div>
               </div>
             </div>
           </button>
 
-          <!-- Hors Casa Button -->
-          <button class="downloadButton" id="exportEchecHorsCasa">
+          <!-- Print Button -->
+          <button class="downloadButton" id="printRetour">
             <div class="button-content">
               <div class="icon-container">
-                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  fill="currentColor"
+                  class="bi bi-arrow-return-left"
+                  viewBox="0 0 16 16"
+                >
                   <path
-                    d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" />
-                  <path d="M14 2V8H20M12 18V12M9 15H15" />
+                    fill-rule="evenodd"
+                    d="M14.5 1.5a.5.5 0 0 1 .5.5v4.8a2.5 
+                      2.5 0 0 1-2.5 2.5H2.707l3.347 
+                      3.346a.5.5 0 0 1-.708.708l-4.2-4.2a.5.5 
+                      0 0 1 0-.708l4-4a.5.5 0 1 1 
+                      .708.708L2.707 8.3H12.5A1.5 
+                      1.5 0 0 0 14 6.8V2a.5.5 0 
+                      0 1 .5-.5"
+                  />
                 </svg>
               </div>
               <div class="button-text">
-                <div class="button-main-text">Échecs Hors Casa</div>
-                <div class="button-sub-text">Exporter les colis en échec hors Casablanca</div>
+                <div class="button-main-text">Imprimer les retours</div>
+                <div class="button-sub-text">
+                  Impression des retours pour affectation des retours
+                </div>
+              </div>
+            </div>
+          </button>
+
+          <button class="downloadButton" id="exportLivreur">
+            <div class="button-content">
+              <div class="icon-container">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="36"
+                  height="36"
+                  viewBox="0 0 64 64"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <circle cx="14" cy="50" r="8" />
+                  <circle cx="50" cy="50" r="8" />
+                  <path d="M14 50h12l6-18 16-2" />
+                  <path d="M14 50l10-18" />
+                  <circle cx="28" cy="24" r="6" />
+                  <rect x="34" y="22" width="14" height="10" />
+                </svg>
+              </div>
+              <div class="button-text">
+                <div class="button-main-text">Données des Livreurs</div>
+                <div class="button-sub-text">
+                  Exporter un fichier Excel des livreurs
+                </div>
               </div>
             </div>
           </button>
         </div>
-        <!-- Refused Button -->
-        <button class="downloadButton" id="exportRefused">
-          <div class="button-content">
-            <div class="icon-container">
-              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                <path
-                  d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" />
-                <path d="M14 2V8H20M9 16L15 10M15 16L9 10" />
-              </svg>
-            </div>
-            <div class="button-text">
-              <div class="button-main-text">Colis Refusés avec Raison</div>
-              <div class="button-sub-text">Exporter les colis refusés avec la raison d'annulation</div>
-            </div>
-          </div>
-        </button>
-
-        <!-- Print Button -->
-        <button class="downloadButton" id="printRetour">
-          <div class="button-content">
-            <div class="icon-container">
-              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                <path
-                  d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" />
-                <path d="M14 2V8H20M9 16L15 10M15 16L9 10" />
-              </svg>
-            </div>
-            <div class="button-text">
-              <div class="button-main-text">Imprimer les retours</div>
-              <div class="button-sub-text">Impression des retours pour affectation des retours</div>
-            </div>
-          </div>
-        </button>
       </div>
+
+      <div class="footer">Shadow Of Leaf • v1.0 •</div>
     </div>
 
-    <div class="footer">
-      Shadow Of Leaf • v1.0 •
-    </div>
-  </div>
-
-  <script src="xlsx.full.min.js"></script>
-  <script src="xlsx-populate.min.js"></script>
-  <script src="popup.js"></script>
-</body>
-
+    <script src="xlsx.full.min.js"></script>
+    <script src="xlsx-populate.min.js"></script>
+    <script src="popup.js"></script>
+  </body>
 </html>

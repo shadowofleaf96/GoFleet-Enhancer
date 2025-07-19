@@ -4,7 +4,6 @@ let lastNotificationMessage = null;
 let lastClickTime = 0;
 let clickCount = 0;
 
-
 const barcodeInput = document.getElementById("js-barcode-input");
 if (barcodeInput) {
   // State variables
@@ -68,12 +67,12 @@ if (barcodeInput) {
     }
   });
 
-
   function handleCopyOperation() {
     if (selectionActive && lastSelection && !isAutoFocusing) {
-      navigator.clipboard.writeText(lastSelection)
+      navigator.clipboard
+        .writeText(lastSelection)
         .then(() => {
-          showToast("Copié !", { type: 'success', duration: 800 });
+          showToast("Copié !", { type: "success", duration: 800 });
           selectionActive = false;
           setTimeout(() => {
             isAutoFocusing = true;
@@ -81,9 +80,9 @@ if (barcodeInput) {
             isAutoFocusing = false;
           }, 200);
         })
-        .catch(err => {
+        .catch((err) => {
           console.error("Copy failed:", err);
-          showToast("Échec de la copie", { type: 'error', duration: 1500 });
+          showToast("Échec de la copie", { type: "error", duration: 1500 });
         });
     }
   }
@@ -99,8 +98,8 @@ if (barcodeInput) {
     }
   });
 
-  barcodeInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
+  barcodeInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
       lastNotificationMessage = null;
 
       setTimeout(() => {
@@ -113,9 +112,9 @@ if (barcodeInput) {
   function showToast(message, options = {}) {
     // Default options
     const {
-      type = 'info', // 'info', 'success', 'error', 'warning'
+      type = "info", // 'info', 'success', 'error', 'warning'
       duration = 2000,
-      position = 'bottom-right'
+      position = "bottom-right",
     } = options;
 
     // Add to queue
@@ -141,7 +140,7 @@ if (barcodeInput) {
       info: "#2196F3",
       success: "#4CAF50",
       error: "#F44336",
-      warning: "#FFC107"
+      warning: "#FFC107",
     };
 
     // Remove current toast if exists
@@ -155,13 +154,13 @@ if (barcodeInput) {
     currentToast = document.createElement("div");
 
     // Simple notification style for copy feedback
-    if (type === 'success' && message === "Copié !") {
+    if (type === "success" && message === "Copié !") {
       currentToast.textContent = message;
       Object.assign(currentToast.style, {
         backgroundColor: colors.success,
         padding: "12px 24px",
         borderRadius: "8px",
-        boxShadow: "0 2px 10px rgba(0,0,0,0.2)"
+        boxShadow: "0 2px 10px rgba(0,0,0,0.2)",
       });
     }
     // Detailed notification style for other messages
@@ -180,7 +179,7 @@ if (barcodeInput) {
         borderRadius: "10px",
         backdropFilter: "blur(5px)",
         maxWidth: "320px",
-        wordBreak: "break-word"
+        wordBreak: "break-word",
       });
     }
 
@@ -194,18 +193,18 @@ if (barcodeInput) {
       opacity: "0",
       transition: "opacity 0.3s ease, transform 0.3s ease",
       zIndex: "10000",
-      transform: "translateY(20px)"
+      transform: "translateY(20px)",
     });
 
     // Position styles
     switch (position) {
-      case 'top-right':
+      case "top-right":
         Object.assign(currentToast.style, { top: "24px", right: "12px" });
         break;
-      case 'top-left':
+      case "top-left":
         Object.assign(currentToast.style, { top: "24px", left: "12px" });
         break;
-      case 'bottom-left':
+      case "bottom-left":
         Object.assign(currentToast.style, { bottom: "24px", left: "12px" });
         break;
       default: // bottom-right
@@ -257,12 +256,12 @@ function checkForNotification() {
     }
   }
 
-  const reasonElements = document.querySelectorAll('.text-red.txt-zone-l99');
-  let cancellationReason = 'Raison non spécifiée';
+  const reasonElements = document.querySelectorAll(".text-red.txt-zone-l99");
+  let cancellationReason = "Raison non spécifiée";
 
   for (const el of reasonElements) {
-    if (el.textContent.includes('Motif:')) {
-      cancellationReason = el.textContent.replace('Motif:', '').trim();
+    if (el.textContent.includes("Motif:")) {
+      cancellationReason = el.textContent.replace("Motif:", "").trim();
       break;
     }
   }
@@ -272,7 +271,8 @@ function checkForNotification() {
   if (refusedFound) {
     currentMessage = "Attention : Ce colis a été annulé: " + cancellationReason;
   } else if (assignCount === 2) {
-    currentMessage = "Attention : 2 fois « Assignée Livreur » – veuillez procéder au cachet du colis « 3 tentatives »";
+    currentMessage =
+      "Attention : 2 fois « Assignée Livreur » – veuillez procéder au cachet du colis « 3 tentatives »";
   } else if (assignCount >= 3) {
     currentMessage = `Attention : Assignée Livreur ${assignCount} fois – veuillez procéder à annuler ce colis`;
   }
@@ -280,8 +280,8 @@ function checkForNotification() {
   // Only show if it's a new message
   if (currentMessage && currentMessage !== lastNotificationMessage) {
     showToast(currentMessage, {
-      type: refusedFound ? 'error' : assignCount >= 3 ? 'error' : 'warning',
-      duration: 2000
+      type: refusedFound ? "error" : assignCount >= 3 ? "error" : "warning",
+      duration: 2000,
     });
     lastNotificationMessage = currentMessage;
     notificationCooldown = true;
@@ -296,21 +296,26 @@ observer.observe(document.body, {
   childList: true,
   subtree: true,
   attributes: false,
-  characterData: false
+  characterData: false,
 });
 
 function debounce(func, wait) {
   let timeout;
   return function () {
-    const context = this, args = arguments;
+    const context = this,
+      args = arguments;
     clearTimeout(timeout);
     timeout = setTimeout(() => func.apply(context, args), wait);
   };
 }
 
 function detectCurrentCity() {
-  const hubText = document.querySelector(".user-top-btn .ml-2")?.textContent || "";
-  const normalized = hubText.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+  const hubText =
+    document.querySelector(".user-top-btn .ml-2")?.textContent || "";
+  const normalized = hubText
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
 
   if (normalized.includes("FES")) return "fes";
   if (normalized.includes("TANGER")) return "tanger";
@@ -343,7 +348,7 @@ function handleExpeditionRequests(request, sender, sendResponse) {
           card.querySelector(".tournee-state")?.textContent.trim() || "Unknown",
         pallets:
           card.querySelector(".small.text-dark")?.textContent.trim() || "0",
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       }));
 
       sendResponse({ expeditions });
@@ -459,46 +464,120 @@ function handleExpeditionRequests(request, sender, sendResponse) {
 
 chrome.runtime.onMessage.addListener(handleExpeditionRequests);
 
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "collectDeliveryBoyData") {
+    const rows = document.querySelectorAll(".js-tournee-info-container");
+    const deliveryBoys = [];
+
+    rows.forEach((row) => {
+      try {
+        const name =
+          row.querySelector(".text-dark-75")?.textContent.trim() || "N/A";
+
+        const livree = parseInt(
+          row
+            .querySelector(
+              "span.text-success.font-weight-bold[style*='font-size:25px']"
+            )
+            ?.textContent.trim() || "0"
+        );
+
+        const retourRecupere = parseInt(
+          row
+            .querySelectorAll(
+              "span.text-success.font-weight-bold[style*='font-size:13px']"
+            )?.[0]
+            ?.textContent.trim() || "0"
+        );
+
+        const nonLivree = parseInt(
+          row
+            .querySelector(
+              "span.font-weight-bold[style*='font-size:25px'][style*='D70073']"
+            )
+            ?.textContent.trim() || "0"
+        );
+
+        const retourNonRecupere = parseInt(
+          row
+            .querySelectorAll(
+              "span.font-weight-bold[style*='font-size:13px'][style*='D70073']"
+            )?.[0]
+            ?.textContent.trim() || "0"
+        );
+
+        const totalColis = livree + nonLivree
+
+        deliveryBoys.push({
+          name,
+          totalColis,
+          livree,
+          retourRecupere,
+          nonLivree,
+          retourNonRecupere,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (e) {
+        console.warn("Failed to parse row", e);
+      }
+    });
+
+    // Save to chrome storage
+    chrome.storage.local.set({ deliveryBoys }, () => {
+      console.log("Delivery data saved:", deliveryBoys);
+      sendResponse({ status: "ok", deliveryBoys });
+    });
+
+    return true;
+  }
+});
+
 function extractRefusedColis() {
   // Get today's date in DD/MM/YYYY format
   const today = new Date();
-  const formattedDate = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
+  const formattedDate = `${String(today.getDate()).padStart(2, "0")}/${String(
+    today.getMonth() + 1
+  ).padStart(2, "0")}/${today.getFullYear()}`;
 
   // Extract livreur name
-  const livreurElement = document.querySelector('.caissier-style label.ml-3');
-  const livreur = livreurElement ? livreurElement.textContent.trim() : 'Unknown';
+  const livreurElement = document.querySelector(".caissier-style label.ml-3");
+  const livreur = livreurElement
+    ? livreurElement.textContent.trim()
+    : "Unknown";
 
   // First get existing data to check for duplicates
   chrome.storage.local.get({ refusedColis: [] }, function (result) {
     const existingColis = result.refusedColis;
-    const existingColisNumbers = new Set(existingColis.map(item => item.colis));
+    const existingColisNumbers = new Set(
+      existingColis.map((item) => item.colis)
+    );
 
     // Extract refused colis data
     const newRefusedColis = [];
 
-    document.querySelectorAll('.js-colis-data').forEach(card => {
-      const status = card.querySelector('.js-statut-info');
-      if (status && status.textContent.includes('Refusé')) {
+    document.querySelectorAll(".js-colis-data").forEach((card) => {
+      const status = card.querySelector(".js-statut-info");
+      if (status && status.textContent.includes("Refusé")) {
         // Extract colis number
-        const colisElement = card.querySelector('h6.style-87');
+        const colisElement = card.querySelector("h6.style-87");
         const colisNumber = colisElement
-          ? colisElement.textContent.replace('Colis N°', '').trim()
-          : 'Unknown';
+          ? colisElement.textContent.replace("Colis N°", "").trim()
+          : "Unknown";
 
         // Only add if this colis isn't already stored
         if (!existingColisNumbers.has(colisNumber)) {
           // Extract reason
-          const reasonElement = card.querySelector('.redo');
+          const reasonElement = card.querySelector(".redo");
           const reason = reasonElement
             ? reasonElement.textContent.trim()
-            : 'Unknown';
+            : "Unknown";
 
           newRefusedColis.push({
             date: formattedDate,
             colis: colisNumber,
             raisonAnnulation: reason,
             livreur: livreur,
-            description: "" // Empty as per requirement
+            description: "", // Empty as per requirement
           });
         }
       }
@@ -506,8 +585,8 @@ function extractRefusedColis() {
 
     if (newRefusedColis.length > 0) {
       chrome.runtime.sendMessage({
-        action: 'storeRefusedColis',
-        data: newRefusedColis
+        action: "storeRefusedColis",
+        data: newRefusedColis,
       });
     }
   });
@@ -519,7 +598,7 @@ function printAllRetourTicketsWithIframes() {
   const allRows = document.querySelectorAll("tr");
   const printUrls = [];
 
-  allRows.forEach(row => {
+  allRows.forEach((row) => {
     const statusCell = row.querySelector("td:nth-child(6) p");
     if (statusCell && statusCell.textContent.includes("Affecté livreur")) {
       const printBtn = row.querySelector("a[href*='PrintRetourTicket']");
