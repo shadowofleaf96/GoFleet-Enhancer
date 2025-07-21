@@ -104,9 +104,165 @@ if (barcodeInput) {
 
       setTimeout(() => {
         checkForNotification();
+        setTimeout(addStatusIcons, 300);
       }, 500);
     }
   });
+
+  function parseDateTime(dateStr) {
+    const [datePart, timePart] = dateStr.split(" à ");
+    const [day, month, year] = datePart.split("/").map(Number);
+    const [hour, minute] = timePart.split(":").map(Number);
+    return new Date(year, month - 1, day, hour, minute);
+  }
+
+  // Debounce function to limit rapid calls
+  function debounce(func, wait) {
+    let timeout;
+    return function () {
+      const context = this,
+        args = arguments;
+      clearTimeout(timeout);
+      timeout = setTimeout(() => func.apply(context, args), wait);
+    };
+  }
+
+  function addStatusIcons() {
+    const historiqueEl = document.getElementById("historique-content");
+    if (!historiqueEl) return;
+
+    const timelineItems = Array.from(document.querySelectorAll(".timeline li"));
+    const deliveryAttempts = [];
+    let currentAttempt = null;
+
+    // Group statuses by delivery attempt
+    timelineItems.forEach((item) => {
+      const text = item.textContent;
+
+      // Start new attempt on "Pris en charge livreur"
+      if (text.includes("Pris en charge livreur")) {
+        currentAttempt = {
+          prisEnChargeItem: item,
+          prisEnChargeDate: null,
+          injoignableItems: [],
+        };
+        deliveryAttempts.push(currentAttempt);
+
+        // Get date for the delivery attempt
+        const dateEl = item.querySelector(".dateh-timeline");
+        if (dateEl) {
+          const dateText = dateEl.textContent.trim();
+          try {
+            currentAttempt.prisEnChargeDate = parseDateTime(dateText);
+          } catch (e) {
+            console.error("Error parsing date:", dateText, e);
+          }
+        }
+      }
+
+      // Add to current attempt on "Injoignable"
+      if (text.includes("Injoignable") && currentAttempt) {
+        const dateEl = item.querySelector(".dateh-timeline");
+        if (dateEl) {
+          const dateText = dateEl.textContent.trim();
+          try {
+            const date = parseDateTime(dateText);
+            currentAttempt.injoignableItems.push({ el: item, date });
+          } catch (e) {
+            console.error("Error parsing date:", dateText, e);
+          }
+        }
+      }
+    });
+
+    // Process each delivery attempt
+    deliveryAttempts.forEach((attempt) => {
+      const injoignableItems = attempt.injoignableItems;
+      if (injoignableItems.length < 2) return;
+
+      // Condition 1: Second injoignable time gap
+      const first = injoignableItems[0];
+      const second = injoignableItems[1];
+      const diffFirst = (second.date - first.date) / 60000; // minutes
+
+      // Add icon to second status
+      const badge1 = second.el.querySelector(".statut-colis-88");
+      if (badge1 && !badge1.querySelector(".status-icon-1")) {
+        const icon = diffFirst >= 45 ? "✅" : "❌";
+        const iconSpan = document.createElement("span");
+        iconSpan.className = "status-icon-1";
+        iconSpan.style.cssText =
+          "display:inline-block;margin-right:8px;font-size:1.2em";
+        iconSpan.textContent = icon;
+        badge1.prepend(iconSpan);
+      }
+
+      // Condition 2: Last injoignable time gap (only if 3+ statuses)
+      if (injoignableItems.length >= 3) {
+        const last = injoignableItems[injoignableItems.length - 1];
+        const prev = injoignableItems[injoignableItems.length - 2];
+        const diffLast = (last.date - prev.date) / 60000; // minutes
+
+        // Add icon to last status
+        const badge2 = last.el.querySelector(".statut-colis-88");
+        if (badge2 && !badge2.querySelector(".status-icon-2")) {
+          const icon = diffLast >= 90 ? "✅" : "❌";
+          const iconSpan = document.createElement("span");
+          iconSpan.className = "status-icon-2";
+          iconSpan.style.cssText =
+            "display:inline-block;margin-right:8px;font-size:1.2em";
+          iconSpan.textContent = icon;
+          badge2.prepend(iconSpan);
+        }
+      }
+    });
+  }
+
+  // Initialize status icon observer
+  function initStatusIconObserver() {
+    const historiqueEl = document.getElementById("historique-content");
+
+    if (historiqueEl) {
+      // Debounced version of addStatusIcons
+      const debouncedAddIcons = debounce(addStatusIcons, 300);
+
+      const observer = new MutationObserver((mutations) => {
+        // Only process if mutations are relevant
+        const hasRelevantChanges = mutations.some(
+          (mutation) =>
+            mutation.type === "childList" &&
+            Array.from(mutation.addedNodes).some(
+              (node) =>
+                node.classList &&
+                (node.classList.contains("timeline") ||
+                  node.classList.contains("statut-colis-88"))
+            )
+        );
+
+        if (hasRelevantChanges) {
+          debouncedAddIcons();
+        }
+      });
+
+      observer.observe(historiqueEl, {
+        childList: true,
+        subtree: true,
+      });
+
+      // Run immediately
+      debouncedAddIcons();
+    } else {
+      // Retry if element doesn't exist yet
+      setTimeout(initStatusIconObserver, 500);
+    }
+  }
+
+  // Start status icon functionality
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initStatusIconObserver);
+  } else {
+    initStatusIconObserver();
+  }
 
   // Improved toast notification system with queue
   function showToast(message, options = {}) {
@@ -499,14 +655,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         );
 
         const retourNonRecupere = parseInt(
-          row
-            .querySelectorAll(
-              "span.font-weight-bold[style*='font-size:13px'][style*='D70073']"
-            )?.[0]
-            ?.textContent.trim() || "0"
+          Array.from(
+            row.querySelectorAll("span.font-weight-bold, span.font-weight-500")
+          )
+            .find((span) =>
+              span.textContent
+                .replace(/\s+/g, " ")
+                .trim()
+                .includes("Non Récupérés")
+            )
+            ?.previousElementSibling?.textContent.match(/\d+/)?.[0] || "0"
         );
 
-        const totalColis = livree + nonLivree
+        const totalColis = livree + nonLivree;
 
         deliveryBoys.push({
           name,
@@ -522,11 +683,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
     });
 
-    // Save to chrome storage
-    chrome.storage.local.set({ deliveryBoys }, () => {
-      console.log("Delivery data saved:", deliveryBoys);
-      sendResponse({ status: "ok", deliveryBoys });
-    });
+    if (deliveryBoys.length === 0) {
+      console.error("No data found for delivery boys.");
+      sendResponse({ status: "error", message: "Aucune donnée trouvée." });
+    } else {
+      chrome.storage.local.set({ deliveryBoys }, () => {
+        console.log("Delivery data saved:", deliveryBoys);
+        sendResponse({ status: "ok", deliveryBoys });
+      });
+    }
 
     return true;
   }

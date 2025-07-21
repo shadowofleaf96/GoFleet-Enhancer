@@ -7,12 +7,16 @@ function formatDate(date = new Date()) {
 
 async function generateDeliveryExcel() {
   try {
-    const { deliveryBoys = [] } = await chrome.storage.local.get("deliveryBoys");
+    const { deliveryBoys = [] } = await chrome.storage.local.get(
+      "deliveryBoys"
+    );
 
     const templatePath = chrome.runtime.getURL(
       "dummy-content/MARJANE-MALL-EXPORT-DATA.xlsx"
     );
-    const templateBuffer = await fetch(templatePath).then((r) => r.arrayBuffer());
+    const templateBuffer = await fetch(templatePath).then((r) =>
+      r.arrayBuffer()
+    );
 
     const workbook = await XlsxPopulate.fromDataAsync(templateBuffer);
     const sheet = workbook.sheet(0);
@@ -45,6 +49,8 @@ async function generateDeliveryExcel() {
     document.body.appendChild(a);
     a.click();
 
+    //    await chrome.storage.local.remove("deliveryBoys");
+
     setTimeout(() => {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
@@ -54,7 +60,6 @@ async function generateDeliveryExcel() {
     alert("Erreur de génération Excel: " + error.message);
   }
 }
-
 
 async function generateExcel() {
   try {
@@ -428,7 +433,8 @@ document.addEventListener("DOMContentLoaded", async () => {
           for (const expedition of validExpeditions) {
             try {
               console.log(
-                `Processing expedition ${processedCount + 1}/${validExpeditions.length
+                `Processing expedition ${processedCount + 1}/${
+                  validExpeditions.length
                 }: ${expedition.number}`
               );
 
