@@ -109,6 +109,7 @@ if (barcodeInput) {
     }
   });
 
+  // ====================== STATUS ICON FUNCTIONALITY ======================
   function parseDateTime(dateStr) {
     const [datePart, timePart] = dateStr.split(" à ");
     const [day, month, year] = datePart.split("/").map(Number);
@@ -180,39 +181,35 @@ if (barcodeInput) {
       const injoignableItems = attempt.injoignableItems;
       if (injoignableItems.length < 2) return;
 
-      // Condition 1: Second injoignable time gap
-      const first = injoignableItems[0];
-      const second = injoignableItems[1];
-      const diffFirst = (second.date - first.date) / 60000; // minutes
+      // Clear existing icons
+      injoignableItems.forEach((item) => {
+        const badge = item.el.querySelector(".statut-colis-88");
+        if (badge) {
+          const existingIcons = badge.querySelectorAll(".status-icon");
+          existingIcons.forEach((icon) => icon.remove());
+        }
+      });
 
-      // Add icon to second status
-      const badge1 = second.el.querySelector(".statut-colis-88");
-      if (badge1 && !badge1.querySelector(".status-icon-1")) {
-        const icon = diffFirst >= 45 ? "✅" : "❌";
-        const iconSpan = document.createElement("span");
-        iconSpan.className = "status-icon-1";
-        iconSpan.style.cssText =
-          "display:inline-block;margin-right:8px;font-size:1.2em";
-        iconSpan.textContent = icon;
-        badge1.prepend(iconSpan);
-      }
+      // Check all injoignable statuses beyond the first one
+      for (let i = 1; i < injoignableItems.length; i++) {
+        const current = injoignableItems[i];
+        const previous = injoignableItems[i - 1];
+        const timeDiff = (current.date - previous.date) / 60000; // minutes
 
-      // Condition 2: Last injoignable time gap (only if 3+ statuses)
-      if (injoignableItems.length >= 3) {
-        const last = injoignableItems[injoignableItems.length - 1];
-        const prev = injoignableItems[injoignableItems.length - 2];
-        const diffLast = (last.date - prev.date) / 60000; // minutes
+        // Determine required threshold: 45 min for second status, 90 min for others
+        const requiredThreshold = i === 1 ? 45 : 90;
+        const icon = timeDiff >= requiredThreshold ? "✅" : "❌";
+        const statusType = i === 1 ? "second" : "subsequent";
 
-        // Add icon to last status
-        const badge2 = last.el.querySelector(".statut-colis-88");
-        if (badge2 && !badge2.querySelector(".status-icon-2")) {
-          const icon = diffLast >= 90 ? "✅" : "❌";
+        // Add icon to current status
+        const badge = current.el.querySelector(".statut-colis-88");
+        if (badge) {
           const iconSpan = document.createElement("span");
-          iconSpan.className = "status-icon-2";
+          iconSpan.className = `status-icon ${statusType}`;
           iconSpan.style.cssText =
             "display:inline-block;margin-right:8px;font-size:1.2em";
           iconSpan.textContent = icon;
-          badge2.prepend(iconSpan);
+          badge.prepend(iconSpan);
         }
       }
     });
@@ -226,22 +223,8 @@ if (barcodeInput) {
       // Debounced version of addStatusIcons
       const debouncedAddIcons = debounce(addStatusIcons, 300);
 
-      const observer = new MutationObserver((mutations) => {
-        // Only process if mutations are relevant
-        const hasRelevantChanges = mutations.some(
-          (mutation) =>
-            mutation.type === "childList" &&
-            Array.from(mutation.addedNodes).some(
-              (node) =>
-                node.classList &&
-                (node.classList.contains("timeline") ||
-                  node.classList.contains("statut-colis-88"))
-            )
-        );
-
-        if (hasRelevantChanges) {
-          debouncedAddIcons();
-        }
+      const observer = new MutationObserver(() => {
+        debouncedAddIcons();
       });
 
       observer.observe(historiqueEl, {
