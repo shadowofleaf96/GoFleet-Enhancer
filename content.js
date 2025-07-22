@@ -194,10 +194,10 @@ if (barcodeInput) {
       for (let i = 1; i < injoignableItems.length; i++) {
         const current = injoignableItems[i];
         const previous = injoignableItems[i - 1];
-        const timeDiff = (current.date - previous.date) / 60000; // minutes
+        const timeDiff = (current.date - previous.date) / 60000;
 
         // Determine required threshold: 45 min for second status, 90 min for others
-        const requiredThreshold = i === 1 ? 45 : 90;
+        const requiredThreshold = i === 1 ? 90 : 90;
         const icon = timeDiff >= requiredThreshold ? "✅" : "❌";
         const statusType = i === 1 ? "second" : "subsequent";
 
@@ -372,6 +372,167 @@ if (barcodeInput) {
     }, duration);
   }
 }
+
+function checkAssignedLivreurAndNotify() {
+  try {
+    logDebug("Starting colis scan...");
+    const rows = document.querySelectorAll("table tr");
+    logDebug(`Found ${rows.length} table rows`);
+
+    const assignedColis = [];
+    let foundValidRows = false;
+
+    rows.forEach((row, index) => {
+      // Try multiple selector strategies
+      const statusElement = row.querySelector("td:nth-child(6) p") ||
+        row.querySelector("td:nth-child(6) span") ||
+        row.querySelector("td:nth-child(6) div");
+
+      if (!statusElement) {
+        logDebug(`Row ${index}: Missing status element`);
+        return;
+      }
+
+      const statusText = statusElement.textContent.replace(/\s+/g, " ").toLowerCase().trim();
+      logDebug(`Row ${index} status: "${statusText}"`);
+
+      if (statusText.includes("récupéré")) {
+        const colisTd = row.querySelector("td:first-child");
+        if (colisTd) {
+          const colisNumber = colisTd.textContent.trim();
+          logDebug(`FOUND ASSIGNED: ${colisNumber}`);
+          assignedColis.push(colisNumber);
+          foundValidRows = true;
+        }
+      }
+    });
+
+    logDebug(`Total assigned colis: ${assignedColis.length}`);
+
+    if (assignedColis.length > 0 && !window.gofToastShown) {
+      showToastWithCopy(assignedColis);
+      window.gofToastShown = true;
+      return true;
+    } else if (!foundValidRows) {
+      logDebug("No valid 'Affecté Livreur' rows detected");
+    }
+
+    return false;
+  } catch (error) {
+    console.error("[GOF-ERROR] checkAssignedLivreurAndNotify:", error);
+    return false;
+  }
+}
+
+function showToastWithCopy(colisList) {
+  // Remove existing toast if present
+  const existingToast = document.getElementById("gof-toast");
+  if (existingToast) existingToast.remove();
+
+  const toast = document.createElement("div");
+  toast.id = "gof-toast";
+  // CSS styles with improved positioning
+  Object.assign(toast.style, {
+    position: "fixed",
+    bottom: "20px",
+    right: "20px",
+    background: "#333",
+    color: "white",
+    padding: "15px 20px",
+    borderRadius: "8px",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+    zIndex: "2147483647", // Max possible z-index
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    fontFamily: "Arial, sans-serif",
+    fontSize: "14px",
+    border: "1px solid #555"
+  });
+
+  toast.innerHTML = `
+    <span><strong>${colisList.length}</strong> colis "Assigné livreur"</span>
+    <button id="gof-copy-colis" style="padding:6px 12px;background:#3498DB;color:white;border:none;border-radius:4px;cursor:pointer;">
+      Copier
+    </button>
+    <button id="gof-dismiss-toast" style="padding:6px 12px;background:#95a5a6;color:white;border:none;border-radius:4px;cursor:pointer;">
+      Fermer
+    </button>
+  `;
+
+  document.body.appendChild(toast);
+
+  // Copy functionality
+  document.getElementById("gof-copy-colis").addEventListener("click", async () => {
+    try {
+      const textToCopy = colisList.join("\n");
+      await navigator.clipboard.writeText(textToCopy);
+      const copyBtn = document.getElementById("gof-copy-colis");
+      copyBtn.textContent = "Copié!";
+      copyBtn.style.background = "#27ae60";
+      setTimeout(() => {
+        copyBtn.textContent = "Copier";
+        copyBtn.style.background = "#3498DB";
+      }, 2000);
+    } catch (copyError) {
+      console.error("[GOF] Clipboard error:", copyError);
+      alert("Échec de copie - vérifiez les autorisations du navigateur");
+    }
+  });
+
+  // Dismiss functionality
+  document.getElementById("gof-dismiss-toast").addEventListener("click", () => {
+    toast.style.opacity = "0";
+    setTimeout(() => toast.remove(), 300);
+  });
+}
+
+// Initialization
+document.addEventListener("DOMContentLoaded", () => {
+  window.gofToastShown = false;
+  logDebug("DOMContentLoaded - Initializing");
+
+  // Phase 1: Immediate check
+  if (checkAssignedLivreurAndNotify()) return;
+
+  // Phase 2: MutationObserver for dynamic tables
+  const observer = new MutationObserver((mutations) => {
+    logDebug(`DOM mutation detected (${mutations.length} changes)`);
+    checkAssignedLivreurAndNotify();
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    characterData: true
+  });
+
+  // Phase 3: Periodic checks (fallback)
+  const checkInterval = setInterval(() => {
+    if (window.gofToastShown) {
+      logDebug("Toast shown - stopping checks");
+      clearInterval(checkInterval);
+      observer.disconnect();
+      return;
+    }
+    logDebug("Performing periodic check...");
+    if (checkAssignedLivreurAndNotify()) {
+      clearInterval(checkInterval);
+      observer.disconnect();
+    }
+  }, 1500);
+
+  // Phase 4: Final fallback
+  setTimeout(() => {
+    if (!window.gofToastShown) {
+      logDebug("Executing final fallback check");
+      checkAssignedLivreurAndNotify();
+    }
+    clearInterval(checkInterval);
+    observer.disconnect();
+  }, 8000);
+});
 
 // Notification check logic
 function checkForNotification() {
@@ -783,7 +944,7 @@ function printAllRetourTicketsWithIframes() {
         iframe.remove();
         index++;
         loadAndPrintNext();
-      }, 4000);
+      }, 5000);
     };
 
     document.body.appendChild(iframe);

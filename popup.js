@@ -49,7 +49,7 @@ async function generateDeliveryExcel() {
     document.body.appendChild(a);
     a.click();
 
-    //    await chrome.storage.local.remove("deliveryBoys");
+    await chrome.storage.local.remove("deliveryBoys");
 
     setTimeout(() => {
       document.body.removeChild(a);
