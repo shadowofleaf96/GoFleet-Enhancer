@@ -65,65 +65,65 @@ const button = document.getElementById("colisInfoInSourceView");
 const targetUrl =
   "https://tms.marjanemall.ma/Hub/Consultation/ZoneColisList?zoneId=4";
 
-button.addEventListener("click", async () => {
-  try {
-    button.disabled = true;
-    const originalContent = button.innerHTML;
+// button.addEventListener("click", async () => {
+//   try {
+//     button.disabled = true;
+//     const originalContent = button.innerHTML;
 
-    // Show spinner while loading
-    button.innerHTML = `
-      <span class="button-spinner-wrapper">
-        <span class="spinner"></span>
-        <span>Chargement...</span>
-      </span>
-    `;
+//     // Show spinner while loading
+//     button.innerHTML = `
+//       <span class="button-spinner-wrapper">
+//         <span class="spinner"></span>
+//         <span>Chargement...</span>
+//       </span>
+//     `;
 
-    // Fetch the raw HTML
-    const response = await fetch(targetUrl, { credentials: "include" });
-    let html = await response.text();
+//     // Fetch the raw HTML
+//     const response = await fetch(targetUrl, { credentials: "include" });
+//     let html = await response.text();
 
-    // Clean HTML (remove scripts and stylesheets)
-    html = html.replace(
-      /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
-      ""
-    );
-    html = html.replace(/<link[^>]*rel=["']stylesheet["'][^>]*>/gi, "");
+//     // Clean HTML (remove scripts and stylesheets)
+//     html = html.replace(
+//       /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+//       ""
+//     );
+//     html = html.replace(/<link[^>]*rel=["']stylesheet["'][^>]*>/gi, "");
 
-    // Wrap in basic HTML structure to ensure compatibility
-    const finalHtml = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <title>Colis Info</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; }
-            table { border-collapse: collapse; width: 100%; }
-            td, th { border: 1px solid #ccc; padding: 6px; text-align: left; }
-          </style>
-        </head>
-        <body>
-          ${html}
-        </body>
-      </html>
-    `;
+//     // Wrap in basic HTML structure to ensure compatibility
+//     const finalHtml = `
+//       <!DOCTYPE html>
+//       <html>
+//         <head>
+//           <meta charset="UTF-8">
+//           <title>Colis Info</title>
+//           <style>
+//             body { font-family: Arial, sans-serif; padding: 20px; }
+//             table { border-collapse: collapse; width: 100%; }
+//             td, th { border: 1px solid #ccc; padding: 6px; text-align: left; }
+//           </style>
+//         </head>
+//         <body>
+//           ${html}
+//         </body>
+//       </html>
+//     `;
 
-    // Create a blob with cleaned HTML
-    const blob = new Blob([finalHtml], { type: "text/html" });
-    const blobUrl = URL.createObjectURL(blob);
+//     // Create a blob with cleaned HTML
+//     const blob = new Blob([finalHtml], { type: "text/html" });
+//     const blobUrl = URL.createObjectURL(blob);
 
-    // Open tab AFTER everything is ready
-    chrome.tabs.create({ url: blobUrl });
+//     // Open tab AFTER everything is ready
+//     chrome.tabs.create({ url: blobUrl });
 
-    // Restore button content
-    button.innerHTML = originalContent;
-    button.disabled = false;
-  } catch (error) {
-    console.error("Failed to open source view:", error);
-    button.disabled = false;
-    button.innerHTML = "Erreur ! Réessayer";
-  }
-});
+//     // Restore button content
+//     button.innerHTML = originalContent;
+//     button.disabled = false;
+//   } catch (error) {
+//     console.error("Failed to open source view:", error);
+//     button.disabled = false;
+//     button.innerHTML = "Erreur ! Réessayer";
+//   }
+// });
 
 async function generateExcel() {
   try {
