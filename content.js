@@ -98,18 +98,168 @@ if (barcodeInput) {
     }
   });
 
+  // Modal system for messages with 80% black transparent background and OK button
+  function showExpeditionModal(message) {
+    // If modal already exists, remove it
+    const existingModal = document.getElementById("custom-modal-overlay");
+    if (existingModal) existingModal.remove();
+
+    // Create overlay
+    const overlay = document.createElement("div");
+    overlay.id = "custom-modal-overlay";
+    Object.assign(overlay.style, {
+      position: "fixed",
+      top: 0,
+      left: 0,
+      width: "100vw",
+      height: "100vh",
+      backgroundColor: "rgba(0, 0, 0, 0.8)", // 80% black transparent
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 11000,
+    });
+
+    // Create modal box
+    const modalBox = document.createElement("div");
+    Object.assign(modalBox.style, {
+      backgroundColor: "#fff",
+      borderRadius: "8px",
+      padding: "24px 32px",
+      maxWidth: "400px",
+      width: "90%",
+      boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
+      textAlign: "center",
+      fontFamily: "Inter, sans-serif",
+    });
+
+    // Message text
+    const messageEl = document.createElement("p");
+    messageEl.textContent = message;
+    messageEl.style.marginBottom = "24px";
+    messageEl.style.fontSize = "16px";
+    messageEl.style.color = "#222";
+
+    // OK button
+    const okBtn = document.createElement("button");
+    okBtn.textContent = "OK";
+    Object.assign(okBtn.style, {
+      backgroundColor: "#4CAF50",
+      color: "#fff",
+      border: "none",
+      padding: "10px 20px",
+      borderRadius: "5px",
+      fontSize: "16px",
+      cursor: "pointer",
+    });
+
+    okBtn.addEventListener("click", () => {
+      overlay.remove();
+    });
+
+    // Assemble modal
+    modalBox.appendChild(messageEl);
+    modalBox.appendChild(okBtn);
+    overlay.appendChild(modalBox);
+
+    document.body.appendChild(overlay);
+  }
+
+  function waitForSpinnerThenShowModal(message) {
+    const spinner = document.querySelector(".fullscreen-loading-spinner");
+    if (!spinner) {
+      // No spinner found, just show modal immediately
+      showExpeditionModal(message);
+      return;
+    }
+
+    function checkSpinner() {
+      const style = getComputedStyle(spinner);
+      if (style.display === "none") {
+        // Spinner is hidden, show modal now
+        showExpeditionModal(message);
+      } else {
+        // Spinner still visible, check again after 100ms
+        setTimeout(checkSpinner, 100);
+      }
+    }
+
+    checkSpinner();
+  }
+
+  // ✅ Get all current colis from DOM
+  function getVisibleColisCodes() {
+    return Array.from(
+      document.querySelectorAll(
+        ".js-colis-details-row .card-header div.text-right"
+      )
+    )
+      .map((el) => {
+        const match = el.textContent.match(/Colis\s*N°\s*(\w+)/i);
+        return match ? match[1] : null;
+      })
+      .filter(Boolean);
+  }
+
+  // ✅ Save all visible colis into chrome.storage.local
+  function saveVisibleColisToStorage() {
+    const codes = getVisibleColisCodes();
+    chrome.storage.local.set({ scannedColisCodes: codes }, () => {
+      console.log("✅ Visible colis codes saved to extension storage:", codes);
+    });
+  }
+
+  // ✅ Add one colis code to storage
+  function addColisToStorage(code) {
+    chrome.storage.local.get(["scannedColisCodes"], (result) => {
+      const scanned = result.scannedColisCodes || [];
+      if (!scanned.includes(code)) {
+        scanned.push(code);
+        chrome.storage.local.set({ scannedColisCodes: scanned }, () => {
+          showExpeditionModal("✅ Colis ajouté avec succès.");
+        });
+      } else {
+        showExpeditionModal("⚠️ Ce colis a déjà été scanné.");
+      }
+    });
+  }
+
+  // ✅ Handler on scan
   barcodeInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
-      lastNotificationMessage = null;
+      const value = barcodeInput.value.trim().toUpperCase();
+      if (!value) return;
+
+      // Show loading spinner
+      document.querySelector(".fullscreen-loading-spinner").style.display =
+        "flex";
 
       setTimeout(() => {
-        checkForNotification();
-        setTimeout(addStatusIcons, 300);
+        // Hide spinner
+        document.querySelector(".fullscreen-loading-spinner").style.display =
+          "none";
+
+        const currentCodes = getVisibleColisCodes();
+        const isInDOM = currentCodes.includes(value);
+
+        chrome.storage.local.get(["scannedColisCodes"], (result) => {
+          const scanned = result.scannedColisCodes || [];
+
+          if (isInDOM && !scanned.includes(value)) {
+            scanned.push(value);
+            chrome.storage.local.set({ scannedColisCodes: scanned }, () => {
+              showExpeditionModal("✅ Colis ajouté avec succès.");
+            });
+          } else if (isInDOM && scanned.includes(value)) {
+            showExpeditionModal("⚠️ Ce colis a déjà été scanné.");
+          } else {
+            showExpeditionModal("❌ Colis introuvable dans la page.");
+          }
+        });
       }, 500);
     }
   });
 
-  // ====================== STATUS ICON FUNCTIONALITY ======================
   function parseDateTime(dateStr) {
     const [datePart, timePart] = dateStr.split(" à ");
     const [day, month, year] = datePart.split("/").map(Number);
@@ -373,166 +523,226 @@ if (barcodeInput) {
   }
 }
 
-function checkAssignedLivreurAndNotify() {
-  try {
-    logDebug("Starting colis scan...");
-    const rows = document.querySelectorAll("table tr");
-    logDebug(`Found ${rows.length} table rows`);
+(function () {
+  function extractAllColisCodesFromHTML() {
+    const nodes = document.querySelectorAll(
+      ".js-colis-details-row .card-header div.text-right"
+    );
+    const codes = [];
 
-    const assignedColis = [];
-    let foundValidRows = false;
-
-    rows.forEach((row, index) => {
-      // Try multiple selector strategies
-      const statusElement = row.querySelector("td:nth-child(6) p") ||
-        row.querySelector("td:nth-child(6) span") ||
-        row.querySelector("td:nth-child(6) div");
-
-      if (!statusElement) {
-        logDebug(`Row ${index}: Missing status element`);
-        return;
-      }
-
-      const statusText = statusElement.textContent.replace(/\s+/g, " ").toLowerCase().trim();
-      logDebug(`Row ${index} status: "${statusText}"`);
-
-      if (statusText.includes("récupéré")) {
-        const colisTd = row.querySelector("td:first-child");
-        if (colisTd) {
-          const colisNumber = colisTd.textContent.trim();
-          logDebug(`FOUND ASSIGNED: ${colisNumber}`);
-          assignedColis.push(colisNumber);
-          foundValidRows = true;
-        }
+    nodes.forEach((node) => {
+      const match = node.textContent.match(/Colis\s*N°\s*(GOF[0-9A-Z]+)/i);
+      if (match) {
+        codes.push(match[1]);
       }
     });
 
-    logDebug(`Total assigned colis: ${assignedColis.length}`);
-
-    if (assignedColis.length > 0 && !window.gofToastShown) {
-      showToastWithCopy(assignedColis);
-      window.gofToastShown = true;
-      return true;
-    } else if (!foundValidRows) {
-      logDebug("No valid 'Affecté Livreur' rows detected");
-    }
-
-    return false;
-  } catch (error) {
-    console.error("[GOF-ERROR] checkAssignedLivreurAndNotify:", error);
-    return false;
+    return codes;
   }
-}
 
-function showToastWithCopy(colisList) {
-  // Remove existing toast if present
-  const existingToast = document.getElementById("gof-toast");
-  if (existingToast) existingToast.remove();
+  function saveColisToExtensionStorage() {
+    const allColisCodes = extractAllColisCodesFromHTML();
+    chrome.storage.local.set({ scannedColisCodes: allColisCodes }, () => {
+      console.log(
+        "✅ All existing colis saved to scannedColisCodes:",
+        allColisCodes
+      );
+    });
+  }
 
-  const toast = document.createElement("div");
-  toast.id = "gof-toast";
-  // CSS styles with improved positioning
-  Object.assign(toast.style, {
-    position: "fixed",
-    bottom: "20px",
-    right: "20px",
-    background: "#333",
-    color: "white",
-    padding: "15px 20px",
-    borderRadius: "8px",
-    boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
-    zIndex: "2147483647", // Max possible z-index
-    display: "flex",
-    alignItems: "center",
-    gap: "12px",
-    fontFamily: "Arial, sans-serif",
-    fontSize: "14px",
-    border: "1px solid #555"
-  });
+  function waitForColisAndSave() {
+    const observer = new MutationObserver((mutations, obs) => {
+      const colisNodes = document.querySelectorAll(".js-colis-details-row");
+      if (colisNodes.length > 0) {
+        obs.disconnect(); // stop observing
+        saveColisToExtensionStorage();
+      }
+    });
 
-  toast.innerHTML = `
-    <span><strong>${colisList.length}</strong> colis "Assigné livreur"</span>
-    <button id="gof-copy-colis" style="padding:6px 12px;background:#3498DB;color:white;border:none;border-radius:4px;cursor:pointer;">
-      Copier
-    </button>
-    <button id="gof-dismiss-toast" style="padding:6px 12px;background:#95a5a6;color:white;border:none;border-radius:4px;cursor:pointer;">
-      Fermer
-    </button>
-  `;
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  }
 
-  document.body.appendChild(toast);
+  // 🔑 Close modal on Enter key press
+  function setupEnterKeyToCloseModal() {
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Enter") {
+        const activeModal = document.querySelector(".modal.show"); // or whatever class your modal uses
+        if (activeModal) {
+          // Option 1: click close button inside modal
+          const closeBtn = activeModal.querySelector(".modal-close");
+          if (closeBtn) {
+            closeBtn.click();
+          } else {
+            // Option 2: hide modal directly
+            activeModal.classList.remove("show");
+            activeModal.classList.add("hidden");
+          }
+        }
+      }
+    });
+  }
 
-  // Copy functionality
-  document.getElementById("gof-copy-colis").addEventListener("click", async () => {
-    try {
-      const textToCopy = colisList.join("\n");
-      await navigator.clipboard.writeText(textToCopy);
-      const copyBtn = document.getElementById("gof-copy-colis");
-      copyBtn.textContent = "Copié!";
-      copyBtn.style.background = "#27ae60";
-      setTimeout(() => {
-        copyBtn.textContent = "Copier";
-        copyBtn.style.background = "#3498DB";
-      }, 2000);
-    } catch (copyError) {
-      console.error("[GOF] Clipboard error:", copyError);
-      alert("Échec de copie - vérifiez les autorisations du navigateur");
+  waitForColisAndSave();
+  setupEnterKeyToCloseModal(); // 👈 Add this
+})();
+
+(function () {
+  window.addEventListener("load", () => {
+    const path = window.location.pathname.replace(/\/$/, ""); // remove trailing slash if any
+
+    if (path === "/Hub/TraitementRetour") {
+      function showToastWithCopy(colisList) {
+        const existingToast = document.getElementById("gof-toast");
+        if (existingToast) existingToast.remove();
+
+        const toast = document.createElement("div");
+        toast.id = "gof-toast";
+        Object.assign(toast.style, {
+          position: "fixed",
+          bottom: "20px",
+          right: "20px",
+          background: "#2c3e50",
+          color: "#ecf0f1",
+          fontFamily: "Arial, sans-serif",
+          fontSize: "14px",
+          padding: "16px",
+          borderRadius: "10px",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+          zIndex: "10000",
+          maxWidth: "300px",
+          opacity: "0",
+          transition: "opacity 0.3s ease",
+        });
+
+        toast.innerHTML = `
+          <div style="margin-bottom: 10px;">
+            <strong style="font-size: 16px; color: #1abc9c;">${colisList.length}</strong> colis <span style="opacity: 0.8;">"Assigné livreur"</span>
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <button id="gof-copy-colis" style="flex:1; padding:8px 10px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; transition: background 0.3s;">Copier</button>
+            <button id="gof-dismiss-toast" style="flex:1; padding:8px 10px; background:#7f8c8d; color:white; border:none; border-radius:6px; cursor:pointer; transition: background 0.3s;">Fermer</button>
+          </div>
+        `;
+
+        document.body.appendChild(toast);
+
+        setTimeout(() => {
+          toast.style.opacity = "1";
+        }, 10);
+
+        document
+          .getElementById("gof-copy-colis")
+          .addEventListener("click", async () => {
+            try {
+              await navigator.clipboard.writeText(colisList.join("\n"));
+              const copyBtn = document.getElementById("gof-copy-colis");
+              copyBtn.textContent = "Copié !";
+              copyBtn.style.background = "#27ae60";
+              setTimeout(() => {
+                copyBtn.textContent = "Copier";
+                copyBtn.style.background = "#3498db";
+              }, 2000);
+            } catch (err) {
+              console.error("Clipboard error:", err);
+              alert("Erreur lors de la copie");
+            }
+          });
+
+        document
+          .getElementById("gof-dismiss-toast")
+          .addEventListener("click", () => {
+            toast.remove();
+          });
+      }
+
+      function showEmptyToast() {
+        const existingToast = document.getElementById("gof-toast");
+        if (existingToast) existingToast.remove();
+
+        const toast = document.createElement("div");
+        toast.id = "gof-toast";
+        Object.assign(toast.style, {
+          position: "fixed",
+          bottom: "20px",
+          right: "20px",
+          background: "#2c3e50",
+          color: "#ecf0f1",
+          fontFamily: "Arial, sans-serif",
+          fontSize: "14px",
+          padding: "16px",
+          borderRadius: "10px",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+          zIndex: "10000",
+          maxWidth: "300px",
+          opacity: "0",
+          transition: "opacity 0.3s ease",
+          textAlign: "center",
+        });
+
+        toast.innerHTML = `
+          <div style="margin-bottom: 10px; font-size: 16px;">
+            Aucun retour <span style="opacity: 0.8;">"Assigné livreur"</span> trouvé
+          </div>
+          <button id="gof-dismiss-toast" style="padding:8px 10px; background:#7f8c8d; color:white; border:none; border-radius:6px; cursor:pointer; transition: background 0.3s;">Fermer</button>
+        `;
+
+        document.body.appendChild(toast);
+
+        setTimeout(() => {
+          toast.style.opacity = "1";
+        }, 10);
+
+        document
+          .getElementById("gof-dismiss-toast")
+          .addEventListener("click", () => {
+            toast.remove();
+          });
+      }
+
+      function checkAssignedLivreurAndNotifyOnce() {
+        try {
+          const table = document.querySelector("table.table");
+          if (!table) return;
+
+          const rows = table.querySelectorAll("tbody tr");
+          const assignedColis = [];
+
+          rows.forEach((row) => {
+            const cells = row.querySelectorAll("td");
+            if (cells.length < 6) return;
+
+            const statusCell = cells[5];
+            const statusText = (
+              statusCell.querySelector(".badge, p, span, div") || statusCell
+            ).textContent
+              .trim()
+              .toLowerCase();
+
+            if (statusText.includes("assigné livreur")) {
+              const colisNumber = cells[0].textContent.trim();
+              assignedColis.push(colisNumber);
+            }
+          });
+
+          if (assignedColis.length > 0) {
+            showToastWithCopy(assignedColis);
+          } else {
+            showEmptyToast();
+          }
+        } catch (e) {
+          console.error("[GOF] Error in notification logic", e);
+        }
+      }
+
+      checkAssignedLivreurAndNotifyOnce();
+    } else {
+      console.log("Not on /Hub/TraitementRetour page, script skipped.");
     }
   });
-
-  // Dismiss functionality
-  document.getElementById("gof-dismiss-toast").addEventListener("click", () => {
-    toast.style.opacity = "0";
-    setTimeout(() => toast.remove(), 300);
-  });
-}
-
-// Initialization
-document.addEventListener("DOMContentLoaded", () => {
-  window.gofToastShown = false;
-  logDebug("DOMContentLoaded - Initializing");
-
-  // Phase 1: Immediate check
-  if (checkAssignedLivreurAndNotify()) return;
-
-  // Phase 2: MutationObserver for dynamic tables
-  const observer = new MutationObserver((mutations) => {
-    logDebug(`DOM mutation detected (${mutations.length} changes)`);
-    checkAssignedLivreurAndNotify();
-  });
-
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    characterData: true
-  });
-
-  // Phase 3: Periodic checks (fallback)
-  const checkInterval = setInterval(() => {
-    if (window.gofToastShown) {
-      logDebug("Toast shown - stopping checks");
-      clearInterval(checkInterval);
-      observer.disconnect();
-      return;
-    }
-    logDebug("Performing periodic check...");
-    if (checkAssignedLivreurAndNotify()) {
-      clearInterval(checkInterval);
-      observer.disconnect();
-    }
-  }, 1500);
-
-  // Phase 4: Final fallback
-  setTimeout(() => {
-    if (!window.gofToastShown) {
-      logDebug("Executing final fallback check");
-      checkAssignedLivreurAndNotify();
-    }
-    clearInterval(checkInterval);
-    observer.disconnect();
-  }, 8000);
-});
+})();
 
 // Notification check logic
 function checkForNotification() {
