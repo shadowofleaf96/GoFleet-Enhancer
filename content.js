@@ -98,93 +98,110 @@ if (barcodeInput) {
     }
   });
 
-  // Modal system for messages with 80% black transparent background and OK button
-  function showExpeditionModal(message) {
-    // If modal already exists, remove it
-    const existingModal = document.getElementById("custom-modal-overlay");
-    if (existingModal) existingModal.remove();
+  barcodeInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      lastNotificationMessage = null;
 
-    // Create overlay
-    const overlay = document.createElement("div");
-    overlay.id = "custom-modal-overlay";
-    Object.assign(overlay.style, {
-      position: "fixed",
-      top: 0,
-      left: 0,
-      width: "100vw",
-      height: "100vh",
-      backgroundColor: "rgba(0, 0, 0, 0.8)", // 80% black transparent
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      zIndex: 11000,
-    });
+      setTimeout(() => {
+        checkForNotification();
+      }, 500);
+    }
+  });
 
-    // Create modal box
-    const modalBox = document.createElement("div");
-    Object.assign(modalBox.style, {
-      backgroundColor: "#fff",
-      borderRadius: "8px",
-      padding: "24px 32px",
-      maxWidth: "400px",
-      width: "90%",
-      boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
-      textAlign: "center",
-      fontFamily: "Inter, sans-serif",
-    });
+  if (
+    window.location.href.startsWith(
+      "https://tms.marjanemall.ma/TourneeMM/Expedition/EditPaletteWithColis"
+    )
+  ) {
 
-    // Message text
-    const messageEl = document.createElement("p");
-    messageEl.textContent = message;
-    messageEl.style.marginBottom = "24px";
-    messageEl.style.fontSize = "16px";
-    messageEl.style.color = "#222";
+    // Modal system for messages with 80% black transparent background and OK button
+    function showExpeditionModal(message) {
+      // If modal already exists, remove it
+      const existingModal = document.getElementById("custom-modal-overlay");
+      if (existingModal) existingModal.remove();
 
-    // OK button
-    const okBtn = document.createElement("button");
-    okBtn.textContent = "OK";
-    Object.assign(okBtn.style, {
-      backgroundColor: "#4CAF50",
-      color: "#fff",
-      border: "none",
-      padding: "10px 20px",
-      borderRadius: "5px",
-      fontSize: "16px",
-      cursor: "pointer",
-    });
+      // Create overlay
+      const overlay = document.createElement("div");
+      overlay.id = "custom-modal-overlay";
+      Object.assign(overlay.style, {
+        position: "fixed",
+        top: 0,
+        left: 0,
+        width: "100vw",
+        height: "100vh",
+        backgroundColor: "rgba(0, 0, 0, 0.8)", // 80% black transparent
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 11000,
+      });
 
-    okBtn.addEventListener("click", () => {
-      overlay.remove();
-    });
+      // Create modal box
+      const modalBox = document.createElement("div");
+      Object.assign(modalBox.style, {
+        backgroundColor: "#fff",
+        borderRadius: "8px",
+        padding: "24px 32px",
+        maxWidth: "400px",
+        width: "90%",
+        boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
+        textAlign: "center",
+        fontFamily: "Inter, sans-serif",
+      });
 
-    // Assemble modal
-    modalBox.appendChild(messageEl);
-    modalBox.appendChild(okBtn);
-    overlay.appendChild(modalBox);
+      // Message text
+      const messageEl = document.createElement("p");
+      messageEl.textContent = message;
+      messageEl.style.marginBottom = "24px";
+      messageEl.style.fontSize = "16px";
+      messageEl.style.color = "#222";
 
-    document.body.appendChild(overlay);
-  }
+      // OK button
+      const okBtn = document.createElement("button");
+      okBtn.textContent = "OK";
+      Object.assign(okBtn.style, {
+        backgroundColor: "#4CAF50",
+        color: "#fff",
+        border: "none",
+        padding: "10px 20px",
+        borderRadius: "5px",
+        fontSize: "16px",
+        cursor: "pointer",
+      });
 
-  function waitForSpinnerThenShowModal(message) {
-    const spinner = document.querySelector(".fullscreen-loading-spinner");
-    if (!spinner) {
-      // No spinner found, just show modal immediately
-      showExpeditionModal(message);
-      return;
+      okBtn.addEventListener("click", () => {
+        overlay.remove();
+      });
+
+      // Assemble modal
+      modalBox.appendChild(messageEl);
+      modalBox.appendChild(okBtn);
+      overlay.appendChild(modalBox);
+
+      document.body.appendChild(overlay);
     }
 
-    function checkSpinner() {
-      const style = getComputedStyle(spinner);
-      if (style.display === "none") {
-        // Spinner is hidden, show modal now
+    function waitForSpinnerThenShowModal(message) {
+      const spinner = document.querySelector(".fullscreen-loading-spinner");
+      if (!spinner) {
+        // No spinner found, just show modal immediately
         showExpeditionModal(message);
-      } else {
-        // Spinner still visible, check again after 100ms
-        setTimeout(checkSpinner, 100);
+        return;
       }
-    }
 
-    checkSpinner();
+      function checkSpinner() {
+        const style = getComputedStyle(spinner);
+        if (style.display === "none") {
+          // Spinner is hidden, show modal now
+          showExpeditionModal(message);
+        } else {
+          // Spinner still visible, check again after 100ms
+          setTimeout(checkSpinner, 100);
+        }
+      }
+
+      checkSpinner();
+    }
   }
 
   // ✅ Get all current colis from DOM
@@ -230,9 +247,14 @@ if (barcodeInput) {
       const value = barcodeInput.value.trim().toUpperCase();
       if (!value) return;
 
-      // Show loading spinner
-      document.querySelector(".fullscreen-loading-spinner").style.display =
-        "flex";
+      try {
+        const spinner = document.querySelector(".fullscreen-loading-spinner");
+        if (spinner) {
+          spinner.style.display = "flex";
+        }
+      } catch (err) {
+        console.warn("Spinner access failed: ", err.message);
+      }
 
       setTimeout(() => {
         // Hide spinner
@@ -253,7 +275,7 @@ if (barcodeInput) {
           } else if (isInDOM && scanned.includes(value)) {
             showExpeditionModal("⚠️ Ce colis a déjà été scanné.");
           } else {
-            showExpeditionModal("❌ Colis introuvable dans la page.");
+            showExpeditionModal("❌ Le numéro de suivi du colis est invalide.");
           }
         });
       }, 500);
@@ -565,7 +587,6 @@ if (barcodeInput) {
     });
   }
 
-  // 🔑 Close modal on Enter key press
   function setupEnterKeyToCloseModal() {
     document.addEventListener("keydown", function (event) {
       if (event.key === "Enter") {
@@ -586,12 +607,12 @@ if (barcodeInput) {
   }
 
   waitForColisAndSave();
-  setupEnterKeyToCloseModal(); // 👈 Add this
+  setupEnterKeyToCloseModal();
 })();
 
 (function () {
   window.addEventListener("load", () => {
-    const path = window.location.pathname.replace(/\/$/, ""); // remove trailing slash if any
+    const path = window.location.pathname.replace(/\/$/, "");
 
     if (path === "/Hub/TraitementRetour") {
       function showToastWithCopy(colisList) {
@@ -1167,4 +1188,30 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg.action === "printRetourIframes") {
     printAllRetourTicketsWithIframes();
   }
+});
+
+const modalObserver = new MutationObserver(() => {
+  const modalBody = document.getElementById("js-affectation-coliszone-modal-body");
+  if (!modalBody) return;
+
+  const forbiddenImg = modalBody.querySelector('#js-colis-livreur-img[src$="forbidden.png"]');
+  const zoneText = modalBody.querySelector("#js-colis-livreur-zone-name-text");
+  const affectButton = document.getElementById("js-affect-colis-to-zone-btn");
+  console.log("Found button:", affectButton);
+
+  if (
+    forbiddenImg &&
+    zoneText &&
+    zoneText.textContent.includes("Zone Expédition vers l'entrepôt") &&
+    affectButton &&
+    affectButton.style.display !== "none"
+  ) {
+    console.log("🚫 Forbidden zone detected, hiding affect button");
+    affectButton.remove();
+  }
+});
+
+modalObserver.observe(document.body, {
+  childList: true,
+  subtree: true,
 });
