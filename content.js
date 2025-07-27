@@ -1,10 +1,10 @@
-let notificationCooldown = false;
-let lastCopyTime = 0;
-let lastNotificationMessage = null;
-let lastClickTime = 0;
-let clickCount = 0;
+var notificationCooldown = false;
+var lastCopyTime = 0;
+var lastNotificationMessage = null;
+var lastClickTime = 0;
+var clickCount = 0;
 
-const barcodeInput = document.getElementById("js-barcode-input");
+var barcodeInput = document.getElementById("js-barcode-input");
 if (barcodeInput) {
   // State variables
   let allowBlur = false;
@@ -98,8 +98,8 @@ if (barcodeInput) {
     }
   });
 
-  barcodeInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
+  barcodeInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
       lastNotificationMessage = null;
 
       setTimeout(() => {
@@ -108,100 +108,105 @@ if (barcodeInput) {
     }
   });
 
-  if (
-    window.location.href.startsWith(
-      "https://tms.marjanemall.ma/TourneeMM/Expedition/EditPaletteWithColis"
-    )
-  ) {
+  // Modal system for messages with 80% black transparent background and OK button
+  function showExpeditionModal(message) {
+    // If modal already exists, remove it
+    const existingModal = document.getElementById("custom-modal-overlay");
+    if (existingModal) existingModal.remove();
 
-    // Modal system for messages with 80% black transparent background and OK button
-    function showExpeditionModal(message) {
-      // If modal already exists, remove it
-      const existingModal = document.getElementById("custom-modal-overlay");
-      if (existingModal) existingModal.remove();
+    // Create overlay
+    const overlay = document.createElement("div");
+    overlay.id = "custom-modal-overlay";
+    Object.assign(overlay.style, {
+      position: "fixed",
+      top: 0,
+      left: 0,
+      width: "100vw",
+      height: "100vh",
+      backgroundColor: "rgba(0, 0, 0, 0.8)", // 80% black transparent
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 11000,
+    });
 
-      // Create overlay
-      const overlay = document.createElement("div");
-      overlay.id = "custom-modal-overlay";
-      Object.assign(overlay.style, {
-        position: "fixed",
-        top: 0,
-        left: 0,
-        width: "100vw",
-        height: "100vh",
-        backgroundColor: "rgba(0, 0, 0, 0.8)", // 80% black transparent
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 11000,
-      });
+    // Create modal box
+    const modalBox = document.createElement("div");
+    Object.assign(modalBox.style, {
+      backgroundColor: "#fff",
+      borderRadius: "8px",
+      padding: "24px 32px",
+      maxWidth: "400px",
+      width: "90%",
+      boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
+      textAlign: "center",
+      fontFamily: "Inter, sans-serif",
+    });
 
-      // Create modal box
-      const modalBox = document.createElement("div");
-      Object.assign(modalBox.style, {
-        backgroundColor: "#fff",
-        borderRadius: "8px",
-        padding: "24px 32px",
-        maxWidth: "400px",
-        width: "90%",
-        boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
-        textAlign: "center",
-        fontFamily: "Inter, sans-serif",
-      });
+    // Message text
+    const messageEl = document.createElement("p");
+    messageEl.textContent = message;
+    messageEl.style.marginBottom = "24px";
+    messageEl.style.fontSize = "16px";
+    messageEl.style.color = "#222";
 
-      // Message text
-      const messageEl = document.createElement("p");
-      messageEl.textContent = message;
-      messageEl.style.marginBottom = "24px";
-      messageEl.style.fontSize = "16px";
-      messageEl.style.color = "#222";
+    // OK button
+    const okBtn = document.createElement("button");
+    okBtn.textContent = "OK";
+    Object.assign(okBtn.style, {
+      backgroundColor: "#4CAF50",
+      color: "#fff",
+      border: "none",
+      padding: "10px 20px",
+      borderRadius: "5px",
+      fontSize: "16px",
+      cursor: "pointer",
+    });
 
-      // OK button
-      const okBtn = document.createElement("button");
-      okBtn.textContent = "OK";
-      Object.assign(okBtn.style, {
-        backgroundColor: "#4CAF50",
-        color: "#fff",
-        border: "none",
-        padding: "10px 20px",
-        borderRadius: "5px",
-        fontSize: "16px",
-        cursor: "pointer",
-      });
+    okBtn.addEventListener("click", () => {
+      overlay.remove();
+    });
 
-      okBtn.addEventListener("click", () => {
-        overlay.remove();
-      });
+    // Assemble modal
+    modalBox.appendChild(messageEl);
+    modalBox.appendChild(okBtn);
+    overlay.appendChild(modalBox);
 
-      // Assemble modal
-      modalBox.appendChild(messageEl);
-      modalBox.appendChild(okBtn);
-      overlay.appendChild(modalBox);
+    document.body.appendChild(overlay);
+  }
 
-      document.body.appendChild(overlay);
-    }
-
-    function waitForSpinnerThenShowModal(message) {
-      const spinner = document.querySelector(".fullscreen-loading-spinner");
-      if (!spinner) {
+  function waitForSpinnerThenShowModal(message) {
+    const spinner = document.querySelector(".fullscreen-loading-spinner");
+    if (!spinner) {
+      if (
+        window.location.href.startsWith(
+          "https://tms.marjanemall.ma/TourneeMM/Expedition/EditPaletteWithColis"
+        )
+      ) {
         // No spinner found, just show modal immediately
         showExpeditionModal(message);
         return;
       }
-
-      function checkSpinner() {
-        const style = getComputedStyle(spinner);
-        if (style.display === "none") {
-          // Spinner is hidden, show modal now
-          showExpeditionModal(message);
-        } else {
-          // Spinner still visible, check again after 100ms
-          setTimeout(checkSpinner, 100);
-        }
-      }
-
-      checkSpinner();
     }
+
+    function checkSpinner() {
+      const style = getComputedStyle(spinner);
+      if (style.display === "none") {
+        // Spinner is hidden, show modal now
+        if (
+          window.location.href.startsWith(
+            "https://tms.marjanemall.ma/TourneeMM/Expedition/EditPaletteWithColis"
+          )
+        ) {
+          showExpeditionModal(message);
+        }
+      } else {
+        // Spinner still visible, check again after 100ms
+        setTimeout(checkSpinner, 100);
+      }
+    }
+
+    checkSpinner();
   }
 
   // ✅ Get all current colis from DOM
@@ -233,10 +238,22 @@ if (barcodeInput) {
       if (!scanned.includes(code)) {
         scanned.push(code);
         chrome.storage.local.set({ scannedColisCodes: scanned }, () => {
-          showExpeditionModal("✅ Colis ajouté avec succès.");
+          if (
+            window.location.href.startsWith(
+              "https://tms.marjanemall.ma/TourneeMM/Expedition/EditPaletteWithColis"
+            )
+          ) {
+            showExpeditionModal("✅ Colis ajouté avec succès.");
+          }
         });
       } else {
-        showExpeditionModal("⚠️ Ce colis a déjà été scanné.");
+        if (
+          window.location.href.startsWith(
+            "https://tms.marjanemall.ma/TourneeMM/Expedition/EditPaletteWithColis"
+          )
+        ) {
+          showExpeditionModal("⚠️ Ce colis a déjà été scanné.");
+        }
       }
     });
   }
@@ -270,12 +287,32 @@ if (barcodeInput) {
           if (isInDOM && !scanned.includes(value)) {
             scanned.push(value);
             chrome.storage.local.set({ scannedColisCodes: scanned }, () => {
-              showExpeditionModal("✅ Colis ajouté avec succès.");
+              if (
+                window.location.href.startsWith(
+                  "https://tms.marjanemall.ma/TourneeMM/Expedition/EditPaletteWithColis"
+                )
+              ) {
+                showExpeditionModal("✅ Colis ajouté avec succès.");
+              }
             });
           } else if (isInDOM && scanned.includes(value)) {
-            showExpeditionModal("⚠️ Ce colis a déjà été scanné.");
+            if (
+              window.location.href.startsWith(
+                "https://tms.marjanemall.ma/TourneeMM/Expedition/EditPaletteWithColis"
+              )
+            ) {
+              showExpeditionModal("⚠️ Ce colis a déjà été scanné.");
+            }
           } else {
-            showExpeditionModal("❌ Le numéro de suivi du colis est invalide.");
+            if (
+              window.location.href.startsWith(
+                "https://tms.marjanemall.ma/TourneeMM/Expedition/EditPaletteWithColis"
+              )
+            ) {
+              showExpeditionModal(
+                "❌ Le numéro de suivi du colis est invalide."
+              );
+            }
           }
         });
       }, 500);
@@ -821,8 +858,8 @@ function checkForNotification() {
 }
 
 // Debounce and observe changes
-const debouncedCheck = debounce(checkForNotification, 500);
-const observer = new MutationObserver(debouncedCheck);
+var debouncedCheck = debounce(checkForNotification, 500);
+var observer = new MutationObserver(debouncedCheck);
 observer.observe(document.body, {
   childList: true,
   subtree: true,
@@ -1190,11 +1227,15 @@ chrome.runtime.onMessage.addListener((msg) => {
   }
 });
 
-const modalObserver = new MutationObserver(() => {
-  const modalBody = document.getElementById("js-affectation-coliszone-modal-body");
+var modalObserver = new MutationObserver(() => {
+  const modalBody = document.getElementById(
+    "js-affectation-coliszone-modal-body"
+  );
   if (!modalBody) return;
 
-  const forbiddenImg = modalBody.querySelector('#js-colis-livreur-img[src$="forbidden.png"]');
+  const forbiddenImg = modalBody.querySelector(
+    '#js-colis-livreur-img[src$="forbidden.png"]'
+  );
   const zoneText = modalBody.querySelector("#js-colis-livreur-zone-name-text");
   const affectButton = document.getElementById("js-affect-colis-to-zone-btn");
   console.log("Found button:", affectButton);
