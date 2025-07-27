@@ -808,28 +808,26 @@ document.addEventListener("DOMContentLoaded", async () => {
           Description: "",
         }));
 
-        // Create workbook
+        // Create workbook and worksheet
         const wb = XLSX.utils.book_new();
         const ws = XLSX.utils.json_to_sheet(cleanData);
 
         // Set column widths
-        const colWidths = [
+        ws["!cols"] = [
           { wch: 15 }, // Date
           { wch: 25 }, // Colis
           { wch: 35 }, // Raison Annulation
           { wch: 30 }, // Livreur
           { wch: 20 }, // Description
         ];
-        ws["!cols"] = colWidths;
 
-        // Style headers
+        // Add headers with styling
         const headerStyle = {
           font: { bold: true, color: { rgb: "FFFFFF" } },
           fill: { fgColor: { rgb: "4A6CF7" } },
           alignment: { horizontal: "center" },
         };
 
-        // Add headers
         const headerRow = [
           "Date",
           "Colis",
@@ -839,7 +837,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         ];
         XLSX.utils.sheet_add_aoa(ws, [headerRow], { origin: "A1" });
 
-        // Apply header styles
         for (let col = 0; col < headerRow.length; col++) {
           const cellRef = XLSX.utils.encode_cell({ r: 0, c: col });
           if (!ws[cellRef]) ws[cellRef] = {};
@@ -847,18 +844,32 @@ document.addEventListener("DOMContentLoaded", async () => {
           Object.assign(ws[cellRef].s, headerStyle);
         }
 
-        // Add worksheet to workbook
+        // Add sheet to workbook
         XLSX.utils.book_append_sheet(wb, ws, "Colis Refusés");
 
-        // Generate filename with today's date
-        const dateString = formatDateForFilename();
-        XLSX.writeFile(wb, `Colis_refusés_${dateString}.xlsx`);
+        // ✅ Create a Blob from workbook and download it manually
+        const wbArrayBuffer = XLSX.write(wb, {
+          bookType: "xlsx",
+          type: "array",
+        });
+        const blob = new Blob([wbArrayBuffer], {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        });
 
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `Colis_refusés_${formatDateForFilename()}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        // Clear data
         await chrome.storage.local.remove("refusedColis");
 
-        // Success notification
         console.log(
-          `Exportation réussie: ${refusedColis.length} colis refusés exportés pour aujourd'hui`
+          `✅ Exportation réussie: ${refusedColis.length} colis refusés exportés`
         );
       } catch (error) {
         console.error("Export échoué:", error);
