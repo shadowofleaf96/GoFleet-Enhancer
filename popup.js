@@ -61,69 +61,69 @@ async function generateDeliveryExcel() {
   }
 }
 
-const button = document.getElementById("colisInfoInSourceView");
-const targetUrl =
-  "https://tms.marjanemall.ma/Hub/Consultation/ZoneColisList?zoneId=4";
+// const button = document.getElementById("colisInfoInSourceView");
+// const targetUrl =
+//   "https://tms.marjanemall.ma/Hub/Consultation/ZoneColisList?zoneId=4";
 
-button.addEventListener("click", async () => {
-  try {
-    button.disabled = true;
-    const originalContent = button.innerHTML;
+// button.addEventListener("click", async () => {
+//   try {
+//     button.disabled = true;
+//     const originalContent = button.innerHTML;
 
-    // Show spinner while loading
-    button.innerHTML = `
-      <span class="button-spinner-wrapper">
-        <span class="spinner"></span>
-        <span>Chargement...</span>
-      </span>
-    `;
+//     // Show spinner while loading
+//     button.innerHTML = `
+//       <span class="button-spinner-wrapper">
+//         <span class="spinner"></span>
+//         <span>Chargement...</span>
+//       </span>
+//     `;
 
-    // Fetch the raw HTML
-    const response = await fetch(targetUrl, { credentials: "include" });
-    let html = await response.text();
+//     // Fetch the raw HTML
+//     const response = await fetch(targetUrl, { credentials: "include" });
+//     let html = await response.text();
 
-    // Clean HTML (remove scripts and stylesheets)
-    html = html.replace(
-      /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
-      ""
-    );
-    html = html.replace(/<link[^>]*rel=["']stylesheet["'][^>]*>/gi, "");
+//     // Clean HTML (remove scripts and stylesheets)
+//     html = html.replace(
+//       /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+//       ""
+//     );
+//     html = html.replace(/<link[^>]*rel=["']stylesheet["'][^>]*>/gi, "");
 
-    // Wrap in basic HTML structure to ensure compatibility
-    const finalHtml = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <title>Colis Info</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; }
-            table { border-collapse: collapse; width: 100%; }
-            td, th { border: 1px solid #ccc; padding: 6px; text-align: left; }
-          </style>
-        </head>
-        <body>
-          ${html}
-        </body>
-      </html>
-    `;
+//     // Wrap in basic HTML structure to ensure compatibility
+//     const finalHtml = `
+//       <!DOCTYPE html>
+//       <html>
+//         <head>
+//           <meta charset="UTF-8">
+//           <title>Colis Info</title>
+//           <style>
+//             body { font-family: Arial, sans-serif; padding: 20px; }
+//             table { border-collapse: collapse; width: 100%; }
+//             td, th { border: 1px solid #ccc; padding: 6px; text-align: left; }
+//           </style>
+//         </head>
+//         <body>
+//           ${html}
+//         </body>
+//       </html>
+//     `;
 
-    // Create a blob with cleaned HTML
-    const blob = new Blob([finalHtml], { type: "text/html" });
-    const blobUrl = URL.createObjectURL(blob);
+//     // Create a blob with cleaned HTML
+//     const blob = new Blob([finalHtml], { type: "text/html" });
+//     const blobUrl = URL.createObjectURL(blob);
 
-    // Open tab AFTER everything is ready
-    chrome.tabs.create({ url: blobUrl });
+//     // Open tab AFTER everything is ready
+//     chrome.tabs.create({ url: blobUrl });
 
-    // Restore button content
-    button.innerHTML = originalContent;
-    button.disabled = false;
-  } catch (error) {
-    console.error("Failed to open source view:", error);
-    button.disabled = false;
-    button.innerHTML = "Erreur ! Réessayer";
-  }
-});
+//     // Restore button content
+//     button.innerHTML = originalContent;
+//     button.disabled = false;
+//   } catch (error) {
+//     console.error("Failed to open source view:", error);
+//     button.disabled = false;
+//     button.innerHTML = "Erreur ! Réessayer";
+//   }
+// });
 
 async function generateExcel() {
   try {
@@ -600,187 +600,187 @@ document.addEventListener("DOMContentLoaded", async () => {
       await processExpeditions();
     });
 
-  document
-    .getElementById("exportEchecHorsCasa")
-    .addEventListener("click", async () => {
-      const [tab] = await chrome.tabs.query({
-        active: true,
-        currentWindow: true,
-      });
-      const { city } = await chrome.tabs.sendMessage(tab.id, {
-        action: "detectCity",
-      });
+  // document
+  //   .getElementById("exportEchecHorsCasa")
+  //   .addEventListener("click", async () => {
+  //     const [tab] = await chrome.tabs.query({
+  //       active: true,
+  //       currentWindow: true,
+  //     });
+  //     const { city } = await chrome.tabs.sendMessage(tab.id, {
+  //       action: "detectCity",
+  //     });
 
-      if (!["tanger", "meknes", "fes", "rabat"].includes(city)) {
-        alert("City not recognized or not supported.");
-        return;
-      }
+  //     if (!["tanger", "meknes", "fes", "rabat"].includes(city)) {
+  //       alert("City not recognized or not supported.");
+  //       return;
+  //     }
 
-      const originalUrl = tab.url;
-      let currentUrl = originalUrl;
+  //     const originalUrl = tab.url;
+  //     let currentUrl = originalUrl;
 
-      const config = {
-        navigationTimeout: 5000,
-        retryDelay: 3000,
-        maxRetries: 5,
-        dataCollectionDelay: 5000,
-        betweenExpeditionDelay: 5000,
-      };
+  //     const config = {
+  //       navigationTimeout: 5000,
+  //       retryDelay: 3000,
+  //       maxRetries: 5,
+  //       dataCollectionDelay: 5000,
+  //       betweenExpeditionDelay: 5000,
+  //     };
 
-      async function navigateWithRetry(url, maxAttempts = config.maxRetries) {
-        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-          try {
-            await chrome.tabs.update(tab.id, { url });
-            await new Promise((resolve, reject) => {
-              const timeout = setTimeout(
-                () => reject(new Error(`Navigation timeout for ${url}`)),
-                config.navigationTimeout
-              );
-              const checkComplete = async () => {
-                const newUrl = (await chrome.tabs.get(tab.id)).url;
-                if (newUrl === url) {
-                  clearTimeout(timeout);
-                  resolve();
-                }
-              };
-              const interval = setInterval(checkComplete, 500);
-            });
-            await new Promise((r) => setTimeout(r, config.dataCollectionDelay));
-            return true;
-          } catch (error) {
-            console.warn(`Navigation attempt ${attempt} failed:`, error);
-            if (attempt === maxAttempts) throw error;
-            await new Promise((r) =>
-              setTimeout(r, attempt * config.retryDelay)
-            );
-          }
-        }
-      }
+  //     async function navigateWithRetry(url, maxAttempts = config.maxRetries) {
+  //       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  //         try {
+  //           await chrome.tabs.update(tab.id, { url });
+  //           await new Promise((resolve, reject) => {
+  //             const timeout = setTimeout(
+  //               () => reject(new Error(`Navigation timeout for ${url}`)),
+  //               config.navigationTimeout
+  //             );
+  //             const checkComplete = async () => {
+  //               const newUrl = (await chrome.tabs.get(tab.id)).url;
+  //               if (newUrl === url) {
+  //                 clearTimeout(timeout);
+  //                 resolve();
+  //               }
+  //             };
+  //             const interval = setInterval(checkComplete, 500);
+  //           });
+  //           await new Promise((r) => setTimeout(r, config.dataCollectionDelay));
+  //           return true;
+  //         } catch (error) {
+  //           console.warn(`Navigation attempt ${attempt} failed:`, error);
+  //           if (attempt === maxAttempts) throw error;
+  //           await new Promise((r) =>
+  //             setTimeout(r, attempt * config.retryDelay)
+  //           );
+  //         }
+  //       }
+  //     }
 
-      async function processPalette(palette, expedition) {
-        const paletteUrl = new URL(palette.link, expedition.link).href;
-        await navigateWithRetry(paletteUrl);
+  //     async function processPalette(palette, expedition) {
+  //       const paletteUrl = new URL(palette.link, expedition.link).href;
+  //       await navigateWithRetry(paletteUrl);
 
-        let colisData;
-        for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
-          try {
-            colisData = await chrome.tabs.sendMessage(tab.id, {
-              action: "collectFullExpeditionData",
-            });
-            if (colisData?.colisList?.length) break;
-            throw new Error("Empty or invalid colis data");
-          } catch (error) {
-            console.warn(
-              `Attempt ${attempt} failed for palette ${palette.number}:`,
-              error
-            );
-            if (attempt === config.maxRetries) throw error;
-            await new Promise((r) =>
-              setTimeout(r, attempt * config.retryDelay)
-            );
-          }
-        }
+  //       let colisData;
+  //       for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
+  //         try {
+  //           colisData = await chrome.tabs.sendMessage(tab.id, {
+  //             action: "collectFullExpeditionData",
+  //           });
+  //           if (colisData?.colisList?.length) break;
+  //           throw new Error("Empty or invalid colis data");
+  //         } catch (error) {
+  //           console.warn(
+  //             `Attempt ${attempt} failed for palette ${palette.number}:`,
+  //             error
+  //           );
+  //           if (attempt === config.maxRetries) throw error;
+  //           await new Promise((r) =>
+  //             setTimeout(r, attempt * config.retryDelay)
+  //           );
+  //         }
+  //       }
 
-        await navigateWithRetry(expedition.link);
-        return colisData.colisList;
-      }
+  //       await navigateWithRetry(expedition.link);
+  //       return colisData.colisList;
+  //     }
 
-      async function runExportLogic(tab, city) {
-        const initialData = await chrome.tabs.sendMessage(tab.id, {
-          action: "collectFullExpeditionData",
-        });
+  //     async function runExportLogic(tab, city) {
+  //       const initialData = await chrome.tabs.sendMessage(tab.id, {
+  //         action: "collectFullExpeditionData",
+  //       });
 
-        if (!initialData?.expeditions)
-          throw new Error("No expedition data found on the initial page");
+  //       if (!initialData?.expeditions)
+  //         throw new Error("No expedition data found on the initial page");
 
-        const allowedStatuses = [
-          "en cours de creation",
-          "en cours d'expedition mm",
-        ];
-        const validExpeditions = initialData.expeditions.filter((exp) => {
-          const cleanedStatus = exp.status
-            .normalize("NFD")
-            .replace(/[̀-ͯ]/g, "")
-            .replace(/[’‘`´]/g, "'")
-            .toLowerCase()
-            .trim();
-          return allowedStatuses.includes(cleanedStatus);
-        });
+  //       const allowedStatuses = [
+  //         "en cours de creation",
+  //         "en cours d'expedition mm",
+  //       ];
+  //       const validExpeditions = initialData.expeditions.filter((exp) => {
+  //         const cleanedStatus = exp.status
+  //           .normalize("NFD")
+  //           .replace(/[̀-ͯ]/g, "")
+  //           .replace(/[’‘`´]/g, "'")
+  //           .toLowerCase()
+  //           .trim();
+  //         return allowedStatuses.includes(cleanedStatus);
+  //       });
 
-        const processedExpeditions = [];
-        for (const expedition of validExpeditions) {
-          try {
-            await navigateWithRetry(expedition.link);
-            const detailData = await chrome.tabs.sendMessage(tab.id, {
-              action: "collectFullExpeditionData",
-            });
-            const processedPalettes = [];
+  //       const processedExpeditions = [];
+  //       for (const expedition of validExpeditions) {
+  //         try {
+  //           await navigateWithRetry(expedition.link);
+  //           const detailData = await chrome.tabs.sendMessage(tab.id, {
+  //             action: "collectFullExpeditionData",
+  //           });
+  //           const processedPalettes = [];
 
-            for (const palette of detailData.palettes || []) {
-              try {
-                const colisList = await processPalette(palette, expedition);
-                processedPalettes.push({
-                  ...palette,
-                  colis: colisList,
-                  colisCount: colisList.length,
-                });
-              } catch (error) {
-                processedPalettes.push({
-                  ...palette,
-                  error: error.message,
-                  colis: [],
-                  colisCount: 0,
-                });
-              }
-            }
+  //           for (const palette of detailData.palettes || []) {
+  //             try {
+  //               const colisList = await processPalette(palette, expedition);
+  //               processedPalettes.push({
+  //                 ...palette,
+  //                 colis: colisList,
+  //                 colisCount: colisList.length,
+  //               });
+  //             } catch (error) {
+  //               processedPalettes.push({
+  //                 ...palette,
+  //                 error: error.message,
+  //                 colis: [],
+  //                 colisCount: 0,
+  //               });
+  //             }
+  //           }
 
-            processedExpeditions.push({
-              ...expedition,
-              tourneeNumber: detailData.tourneeNumber,
-              plombNumber: detailData.plombNumber,
-              palettes: processedPalettes,
-            });
+  //           processedExpeditions.push({
+  //             ...expedition,
+  //             tourneeNumber: detailData.tourneeNumber,
+  //             plombNumber: detailData.plombNumber,
+  //             palettes: processedPalettes,
+  //           });
 
-            await navigateWithRetry(originalUrl);
-            await new Promise((r) =>
-              setTimeout(r, config.betweenExpeditionDelay)
-            );
-          } catch (error) {
-            console.error(
-              `Failed to process expedition ${expedition.number}:`,
-              error
-            );
-            processedExpeditions.push({
-              ...expedition,
-              error: error.message,
-              palettes: [],
-            });
-          }
-        }
+  //           await navigateWithRetry(originalUrl);
+  //           await new Promise((r) =>
+  //             setTimeout(r, config.betweenExpeditionDelay)
+  //           );
+  //         } catch (error) {
+  //           console.error(
+  //             `Failed to process expedition ${expedition.number}:`,
+  //             error
+  //           );
+  //           processedExpeditions.push({
+  //             ...expedition,
+  //             error: error.message,
+  //             palettes: [],
+  //           });
+  //         }
+  //       }
 
-        return processedExpeditions;
-      }
+  //       return processedExpeditions;
+  //     }
 
-      const collectedData = await runExportLogic(tab, city);
-      const storageKey = `expeditions_${city}`;
-      await chrome.storage.local.set({ [storageKey]: collectedData });
+  //     const collectedData = await runExportLogic(tab, city);
+  //     const storageKey = `expeditions_${city}`;
+  //     await chrome.storage.local.set({ [storageKey]: collectedData });
 
-      const keys = await chrome.storage.local.get([
-        "expeditions_tanger",
-        "expeditions_meknes",
-        "expeditions_fes",
-        "expeditions_rabat",
-      ]);
+  //     const keys = await chrome.storage.local.get([
+  //       "expeditions_tanger",
+  //       "expeditions_meknes",
+  //       "expeditions_fes",
+  //       "expeditions_rabat",
+  //     ]);
 
-      const completed = Object.values(keys).filter(Boolean).length;
+  //     const completed = Object.values(keys).filter(Boolean).length;
 
-      if (completed === 4) {
-        await generateExcelHorsCasa();
-        alert("Exportation terminé pour toutes les Zones hors CASA !");
-      } else {
-        alert(`Ville ${city.toUpperCase()} terminée. Passez à la suivante.`);
-      }
-    });
+  //     if (completed === 4) {
+  //       await generateExcelHorsCasa();
+  //       alert("Exportation terminé pour toutes les Zones hors CASA !");
+  //     } else {
+  //       alert(`Ville ${city.toUpperCase()} terminée. Passez à la suivante.`);
+  //     }
+  //   });
 
   function formatDateForFilename(date = new Date()) {
     const day = String(date.getDate()).padStart(2, "0");
