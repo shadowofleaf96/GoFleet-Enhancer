@@ -591,7 +591,7 @@ if (barcodeInput) {
 
     nodes.forEach((node) => {
       const match = node.textContent.match(
-        /Colis\s*N°\s*((?:GOF|GMK|GFS|GTG|GRB)[0-9A-Z]+)/i
+        /Colis\s*N°\s*((?:GOF|GMK|GFS|GTG|GRB)[0-9A-Z]+|\d{6}[0-9A-Z]{6,})/i
       );
       if (match) {
         codes.push(match[1]);
