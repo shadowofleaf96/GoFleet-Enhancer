@@ -31,7 +31,11 @@ chrome.runtime.onMessage.addListener((request, sender) => {
   if (request.action === "storeRefusedColis") {
     chrome.storage.local.get({ refusedColis: [] }, (result) => {
       const filteredData = request.data.filter(
-        (item) => item.colis && item.colis.startsWith("GOF")
+        (item) =>
+          item.colis &&
+          ["GOF", "GMK", "GFS", "GTG", "GRB"].some((prefix) =>
+            item.colis.startsWith(prefix)
+          )
       );
 
       const existingColisNumbers = new Set(
