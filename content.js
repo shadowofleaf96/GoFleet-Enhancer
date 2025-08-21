@@ -1258,3 +1258,65 @@ modalObserver.observe(document.body, {
   childList: true,
   subtree: true,
 });
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === "searchTracking") {
+    const trackingToFind = message.trackingToFind.trim();
+
+    (async () => {
+      // Select all Colis elements in the page
+      const colisElements = document.querySelectorAll(
+        ".text-green.font-weight-bold"
+      );
+
+      const colisNumbers = [...colisElements]
+        .map((el) => {
+          const match = el.textContent.match(/([G][A-Z]{2}\d{6,})|([0-9]{20})/);
+          if (match) return match[0].trim();
+          return null;
+        })
+        .filter(Boolean);
+
+      let foundColis = null;
+      let trackingResult = null;
+
+      for (const colisNum of colisNumbers) {
+
+        const apiColisNum = colisNum.endsWith("A") ? colisNum : colisNum + "A";
+
+        try {
+          const response = await fetch(
+            `https://tms.marjanemall.ma/AffectationLivreur/Affectation/GetColisHistorique?cab=${apiColisNum}`,
+            { credentials: "include" }
+          );
+          const data = await response.json();
+
+          // Ensure we can handle array or single object
+          const colisList = Array.isArray(data.data) ? data.data : [data.data];
+
+          for (const colisItem of colisList) {
+            const code = colisItem?.ColisNum?.trim();
+
+            if (code === trackingToFind) {
+              foundColis = apiColisNum;
+              trackingResult = colisItem.TrackingCode;
+              break;
+            }
+          }
+
+          if (foundColis) break;
+        } catch (error) {
+          console.error("Erreur fetch pour", colisNum, ":", error);
+        }
+      }
+
+      sendResponse({
+        found: !!foundColis,
+        colisNumber: foundColis,
+        trackingCode: trackingResult,
+      });
+    })();
+
+    return true; // keep channel open for async
+  }
+});

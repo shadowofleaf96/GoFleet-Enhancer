@@ -239,7 +239,6 @@ async function generateExcelHorsCasa() {
       return `${year}-${month}-${day}`;
     }
 
-    // Function to fill a given sheet
     const updateSheet = (sheetName, data) => {
       const sheet = workbook.sheet(sheetName);
       sheet.cell("I2").value(formatDate());
@@ -274,7 +273,6 @@ async function generateExcelHorsCasa() {
       });
     };
 
-    // Iterate through cities
     for (const city of cities) {
       const expeditions = storedData[`expeditions_${city}`] || [];
 
@@ -322,6 +320,72 @@ document.addEventListener("DOMContentLoaded", async () => {
       currentWindow: true,
     });
     chrome.tabs.sendMessage(tab.id, { action: "printRetourIframes" });
+  });
+
+  const searchBtn = document.getElementById("searchTrackingBtn");
+  const input = document.getElementById("trackingInput");
+  const startBtn = document.getElementById("startSearchBtn");
+
+  let isVisible = false;
+
+  searchBtn.addEventListener("click", () => {
+    isVisible = !isVisible;
+
+    if (isVisible) {
+      input.style.display = "block";
+      startBtn.style.display = "block";
+
+      // Auto focus input after showing it
+      setTimeout(() => input.focus(), 50);
+    } else {
+      input.style.display = "none";
+      startBtn.style.display = "none";
+    }
+  });
+
+  startBtn.addEventListener("click", async () => {
+    const trackingToFind = input.value.trim();
+    if (!trackingToFind) {
+      alert("Veuillez entrer un code tracking.");
+      input.focus(); // Keep focus if empty
+      return;
+    }
+
+    startBtn.innerHTML = `
+      <span class="button-spinner-wrapper">
+        <span class="spinner"></span>
+        <span>Chargement...</span>
+      </span>
+    `;
+    startBtn.disabled = true;
+
+    console.log("Envoi du tracking au content script:", trackingToFind);
+
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const tab = tabs[0];
+      chrome.tabs.sendMessage(
+        tab.id,
+        { action: "searchTracking", trackingToFind },
+        (response) => {
+          console.log("Réponse du content script:", response);
+
+          if (response && response.found) {
+            alert(`✅ Tracking trouvé: ${response.trackingCode}`);
+          } else {
+            alert("❌ Tracking introuvable dans cette page.");
+          }
+
+          // Reset UI
+          startBtn.innerHTML = "Valider";
+          startBtn.disabled = false;
+          input.value = "";
+
+          input.style.display = "none";
+          startBtn.style.display = "none";
+          isVisible = false;
+        }
+      );
+    });
   });
 
   document
