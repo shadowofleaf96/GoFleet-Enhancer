@@ -1320,3 +1320,217 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // keep channel open for async
   }
 });
+
+// --- Start Consultation page calls check ---
+function parseJsonDateTime(dateStr, timeStr) {
+  if (!dateStr || !timeStr) return new Date();
+  const [day, month, year] = dateStr.split("/").map(Number);
+  const [hour, minute] = timeStr.split(":").map(Number);
+  return new Date(year, month - 1, day, hour, minute);
+}
+
+function processConsultationPageCalls() {
+  if (!window.location.pathname.includes("/Hub/Consultation/") &&
+      !window.location.pathname.includes("/Caissier/Caissier/TraitementLivreurExcute")) {
+    return;
+  }
+  
+  const cards = document.querySelectorAll(".js-colis-data:not(.calls-processed)");
+  if (cards.length === 0) return;
+
+  cards.forEach(async (card) => {
+    card.classList.add("calls-processed");
+    const colinum = card.getAttribute("data-colinum");
+    if (!colinum) return;
+    
+    const apiColisNum = colinum.endsWith("A") ? colinum : colinum + "A";
+
+    try {
+      const response = await fetch(`https://tms.marjanemall.ma/AffectationLivreur/Affectation/GetColisHistorique?cab=${apiColisNum}`, { credentials: "include" });
+      const json = await response.json();
+      
+      let details = [];
+      if (json.Success && json.data && Array.isArray(json.data.detail)) {
+        details = json.data.detail;
+      } else if (json.Success && Array.isArray(json.data)) {
+        const item = json.data.find(d => (d.ColisNum || "").trim() === apiColisNum || (d.TrackingCode || "").trim() === apiColisNum);
+        if (item && Array.isArray(item.detail)) details = item.detail;
+      }
+      
+      if (!details || details.length === 0) return;
+
+      const deliveryAttempts = [];
+      let currentAttempt = null;
+      
+      details.forEach(item => {
+        const status = item.ColisStatut || "";
+        
+        if (status.includes("Pris en charge livreur")) {
+          currentAttempt = {
+            date: parseJsonDateTime(item.DateColis, item.TimeColis),
+            injoignableItems: []
+          };
+          deliveryAttempts.push(currentAttempt);
+        }
+        
+        if (status.includes("Injoignable") && currentAttempt) {
+          const date = parseJsonDateTime(item.DateColis, item.TimeColis);
+          currentAttempt.injoignableItems.push({ date, item });
+        }
+      });
+      
+      if (deliveryAttempts.length === 0) return;
+
+      const container = document.createElement("div");
+      container.style.marginTop = "12px";
+      container.style.paddingTop = "12px";
+      container.style.borderTop = "1px dashed rgba(0,0,0,0.15)";
+      container.style.display = "flex";
+      container.style.flexWrap = "wrap";
+      container.style.gap = "8px";
+      
+      deliveryAttempts.forEach((attempt, index) => {
+        const injoignableItems = attempt.injoignableItems;
+        
+        // Determine overall status for this attempt to style the pill
+        let hasInvalidCall = false;
+        
+        for (let i = 1; i < injoignableItems.length; i++) {
+          const timeDiff = (injoignableItems[i].date - injoignableItems[i - 1].date) / 60000;
+          if (timeDiff < 90) hasInvalidCall = true;
+        }
+        
+        const isSuccess = injoignableItems.length >= 3 && !hasInvalidCall;
+        const isWarning = injoignableItems.length > 0 && !isSuccess;
+        
+        const bgColor = isSuccess ? "#e8f5e9" : (isWarning ? "#fff3e0" : "#f5f5f5");
+        const borderColor = isSuccess ? "#c8e6c9" : (isWarning ? "#ffe0b2" : "#e0e0e0");
+        const textColor = isSuccess ? "#2e7d32" : (isWarning ? "#e65100" : "#616161");
+
+        const attemptDiv = document.createElement("div");
+        attemptDiv.style.display = "inline-flex";
+        attemptDiv.style.alignItems = "center";
+        attemptDiv.style.backgroundColor = bgColor;
+        attemptDiv.style.border = `1px solid ${borderColor}`;
+        attemptDiv.style.borderRadius = "30px";
+        attemptDiv.style.padding = "4px 12px";
+        attemptDiv.style.fontSize = "12.5px";
+        attemptDiv.style.color = textColor;
+        attemptDiv.style.boxShadow = "0 1px 2px rgba(0,0,0,0.05)";
+        
+        const dateStr = isNaN(attempt.date) ? "" : `${String(attempt.date.getDate()).padStart(2, '0')}/${String(attempt.date.getMonth() + 1).padStart(2, '0')}`;
+        
+        const titleSpan = document.createElement("strong");
+        titleSpan.style.marginRight = "6px";
+        titleSpan.textContent = `T${index + 1} (${dateStr}):`;
+        
+        const iconsSpan = document.createElement("span");
+        iconsSpan.style.display = "flex";
+        iconsSpan.style.alignItems = "center";
+        iconsSpan.style.gap = "4px";
+        
+        if (injoignableItems.length === 0) {
+          iconsSpan.textContent = "0 appel";
+          iconsSpan.style.opacity = "0.7";
+        } else {
+          const textNode = document.createTextNode(`${injoignableItems.length} appel${injoignableItems.length > 1 ? 's' : ''}`);
+          iconsSpan.appendChild(textNode);
+          
+          for (let i = 1; i < injoignableItems.length; i++) {
+            const timeDiff = (injoignableItems[i].date - injoignableItems[i - 1].date) / 60000;
+            const icon = timeDiff >= 90 ? "✅" : "❌";
+            
+            const span = document.createElement("span");
+            span.textContent = icon;
+            span.title = `Écart: ${Math.round(timeDiff)} min`;
+            iconsSpan.appendChild(span);
+          }
+        }
+        
+        attemptDiv.appendChild(titleSpan);
+        attemptDiv.appendChild(iconsSpan);
+        container.appendChild(attemptDiv);
+      });
+      
+      card.appendChild(container);
+      
+    } catch (e) {
+      console.error("Error fetching historique for", colinum, e);
+    }
+  });
+}
+
+var consultationObserver = new MutationObserver(() => {
+  if (window.location.pathname.includes("/Hub/Consultation/") ||
+      window.location.pathname.includes("/Caissier/Caissier/TraitementLivreurExcute")) {
+    processConsultationPageCalls();
+  }
+});
+
+consultationObserver.observe(document.body, { childList: true, subtree: true });
+setTimeout(processConsultationPageCalls, 1000);
+// --- End Consultation page calls check ---
+
+// --- Start Colis Counter ---
+var lastColisCount = -1;
+
+function findColisScannesElement() {
+  const all = document.querySelectorAll('*');
+  for (let i = 0; i < all.length; i++) {
+    const el = all[i];
+    for (let j = 0; j < el.childNodes.length; j++) {
+      const node = el.childNodes[j];
+      if (node.nodeType === 3 && node.nodeValue.toLowerCase().includes("colis scann")) {
+        return el;
+      }
+    }
+  }
+  return null;
+}
+
+function updateColisCounter() {
+  if (!window.location.pathname.includes("/TourneeMM/Expedition/EditPaletteWithColis")) return;
+  
+  const count = document.querySelectorAll('.js-colis-details-row').length;
+  if (count === lastColisCount) return;
+  lastColisCount = count;
+  
+  let counterEl = document.getElementById("gof-colis-counter");
+  if (!counterEl) {
+    counterEl = document.createElement("span");
+    counterEl.id = "gof-colis-counter";
+    Object.assign(counterEl.style, {
+      backgroundColor: "#2c3e50",
+      color: "#ecf0f1",
+      padding: "4px 8px",
+      borderRadius: "12px",
+      fontSize: "14px",
+      fontWeight: "bold",
+      marginLeft: "10px",
+      display: "inline-block"
+    });
+    
+    const targetEl = findColisScannesElement();
+    if (targetEl) {
+      targetEl.appendChild(counterEl);
+    } else {
+      // Fallback
+      Object.assign(counterEl.style, { position: "fixed", top: "80px", right: "20px", zIndex: "9999" });
+      document.body.appendChild(counterEl);
+    }
+  }
+  
+  counterEl.textContent = `Total : ${count}`;
+}
+
+var colisCounterObserver = new MutationObserver((mutations) => {
+  if (window.location.pathname.includes("/TourneeMM/Expedition/EditPaletteWithColis")) {
+    const isSelfMutation = mutations.every(m => m.target.id === "gof-colis-counter" || (m.target.parentNode && m.target.parentNode.id === "gof-colis-counter"));
+    if (!isSelfMutation) {
+      updateColisCounter();
+    }
+  }
+});
+colisCounterObserver.observe(document.body, { childList: true, subtree: true });
+setTimeout(updateColisCounter, 1000);
+// --- End Colis Counter ---

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "GoFleet Enhancer",
   "description": "Professional tool for barcode scanning workflow optimization with seamless data export capabilities. Maintains input focus while allowing text operations and provides one-click Excel exports.",
-  "version": "1.0",
+  "version": "1.1",
   "permissions": [
     "clipboardWrite",
     "activeTab",
