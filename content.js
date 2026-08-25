@@ -563,8 +563,10 @@ if (barcodeInput) {
 
     // Animate in
     requestAnimationFrame(() => {
-      currentToast.style.opacity = "1";
-      currentToast.style.transform = "translateY(0)";
+      if (currentToast) {
+        currentToast.style.opacity = "1";
+        currentToast.style.transform = "translateY(0)";
+      }
     });
 
     // Auto-dismiss after delay
@@ -1433,18 +1435,33 @@ function processConsultationPageCalls() {
           iconsSpan.textContent = "0 appel";
           iconsSpan.style.opacity = "0.7";
         } else {
-          const textNode = document.createTextNode(`${injoignableItems.length} appel${injoignableItems.length > 1 ? 's' : ''}`);
+          const textNode = document.createTextNode(`${injoignableItems.length} appel${injoignableItems.length > 1 ? 's' : ''} (`);
           iconsSpan.appendChild(textNode);
           
-          for (let i = 1; i < injoignableItems.length; i++) {
-            const timeDiff = (injoignableItems[i].date - injoignableItems[i - 1].date) / 60000;
-            const icon = timeDiff >= 90 ? "✅" : "❌";
+          injoignableItems.forEach((item, i) => {
+            const timeStr = `${String(item.date.getHours()).padStart(2, '0')}:${String(item.date.getMinutes()).padStart(2, '0')}`;
+            const timeSpan = document.createElement("span");
+            timeSpan.textContent = timeStr;
+            iconsSpan.appendChild(timeSpan);
             
-            const span = document.createElement("span");
-            span.textContent = icon;
-            span.title = `Écart: ${Math.round(timeDiff)} min`;
-            iconsSpan.appendChild(span);
-          }
+            if (i > 0) {
+              const timeDiff = (item.date - injoignableItems[i - 1].date) / 60000;
+              const icon = timeDiff >= 90 ? "✅" : "❌";
+              const iconSpan = document.createElement("span");
+              iconSpan.textContent = icon;
+              iconSpan.title = `Écart: ${Math.round(timeDiff)} min`;
+              iconSpan.style.marginLeft = "2px";
+              iconsSpan.appendChild(iconSpan);
+            }
+            
+            if (i < injoignableItems.length - 1) {
+              const sepNode = document.createTextNode(" - ");
+              iconsSpan.appendChild(sepNode);
+            }
+          });
+          
+          const closeParenNode = document.createTextNode(")");
+          iconsSpan.appendChild(closeParenNode);
         }
         
         attemptDiv.appendChild(titleSpan);
