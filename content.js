@@ -428,7 +428,7 @@ if (barcodeInput) {
   function initStatusIconObserver() {
     const historiqueEl = document.getElementById("historique-content");
 
-    if (historiqueEl) {
+    if (historiqueEl && historiqueEl instanceof Node) {
       // Debounced version of addStatusIcons
       const debouncedAddIcons = debounce(addStatusIcons, 300);
 
@@ -585,6 +585,8 @@ if (barcodeInput) {
 }
 
 (function () {
+  if (!document || !document.body || !(document.body instanceof Node)) return;
+
   function extractAllColisCodesFromHTML() {
     const nodes = document.querySelectorAll(
       ".js-colis-details-row .card-header div.text-right"
@@ -614,6 +616,7 @@ if (barcodeInput) {
   }
 
   function waitForColisAndSave() {
+    if (!document.body || !(document.body instanceof Node)) return;
     const observer = new MutationObserver((mutations, obs) => {
       const colisNodes = document.querySelectorAll(".js-colis-details-row");
       if (colisNodes.length > 0) {
@@ -863,13 +866,22 @@ function checkForNotification() {
 
 // Debounce and observe changes
 var debouncedCheck = debounce(checkForNotification, 500);
-var observer = new MutationObserver(debouncedCheck);
-observer.observe(document.body, {
-  childList: true,
-  subtree: true,
-  attributes: false,
-  characterData: false,
-});
+var observer = null;
+if (
+  document.body &&
+  document.body instanceof Node &&
+  (window.location.pathname.includes("/Hub/TraitementRetour") ||
+    document.querySelector(".tournee-state") ||
+    document.getElementById("js-barcode-input"))
+) {
+  observer = new MutationObserver(debouncedCheck);
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: false,
+    characterData: false,
+  });
+}
 
 function debounce(func, wait) {
   let timeout;
@@ -948,10 +960,13 @@ function handleExpeditionRequests(request, sender, sendResponse) {
         }
       });
 
-      observer.observe(container || document.body, {
-        childList: true,
-        subtree: true,
-      });
+      const targetContainer = container || document.body;
+      if (targetContainer && targetContainer instanceof Node) {
+        observer.observe(targetContainer, {
+          childList: true,
+          subtree: true,
+        });
+      }
 
       function processColisElements(elements) {
         const colisList = Array.from(elements).map((colis) => {
@@ -1036,6 +1051,549 @@ function handleExpeditionRequests(request, sender, sendResponse) {
 
 chrome.runtime.onMessage.addListener(handleExpeditionRequests);
 
+// --- Start Caissier History & Snapshot Module ---
+function isCaissierPage() {
+  const path = window.location.pathname.toLowerCase();
+  return (
+    path.includes("/caissier/caissier") &&
+    !path.includes("/traitementlivreuxexcute") &&
+    !path.includes("/traitementlivreurexcute")
+  );
+}
+
+function getCaissierDateFilter() {
+  const dateInput = document.querySelector(
+    "input[name='dateFilter'], input#dateFilter, input[type='date']"
+  );
+  if (dateInput && dateInput.value) {
+    return dateInput.value.trim();
+  }
+  const today = new Date();
+  const y = today.getFullYear();
+  const m = String(today.getMonth() + 1).padStart(2, "0");
+  const d = String(today.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function parseDeliveryBoyRow(row) {
+  const name =
+    row.querySelector(".text-dark-75")?.textContent?.trim() ||
+    row.getAttribute("data-livreurname")?.trim() ||
+    "N/A";
+
+  let livree = 0;
+  let nonLivree = 0;
+  let retourRecupere = 0;
+  let retourNonRecupere = 0;
+
+  // Cibler spécifiquement les éléments span pour ne pas capturer les conteneurs div parents
+  const spans = Array.from(row.querySelectorAll("span"));
+
+  for (const span of spans) {
+    const text = span.textContent.replace(/\s+/g, " ").trim().toLowerCase();
+
+    // 1. Non Livrés (ex: "Non livrés", "Non Livrées")
+    if (text.includes("non") && (text.includes("livré") || text.includes("livree"))) {
+      const prev = span.previousElementSibling?.textContent?.match(/\d+/);
+      const next = span.nextElementSibling?.textContent?.match(/\d+/);
+      const self = span.textContent?.match(/\d+/);
+      const parent = span.parentElement?.textContent?.match(/\d+/);
+      nonLivree = prev ? parseInt(prev[0], 10) : next ? parseInt(next[0], 10) : self ? parseInt(self[0], 10) : parent ? parseInt(parent[0], 10) : 0;
+    }
+    // 2. Livrés (en excluant strictement "non")
+    else if (!text.includes("non") && (text === "livrés" || text === "livrées" || text === "livré" || text === "livrée" || text.startsWith("livré"))) {
+      const prev = span.previousElementSibling?.textContent?.match(/\d+/);
+      const next = span.nextElementSibling?.textContent?.match(/\d+/);
+      const self = span.textContent?.match(/\d+/);
+      const parent = span.parentElement?.textContent?.match(/\d+/);
+      livree = prev ? parseInt(prev[0], 10) : next ? parseInt(next[0], 10) : self ? parseInt(self[0], 10) : parent ? parseInt(parent[0], 10) : 0;
+    }
+    // 3. Non Récupérés (ex: "Non Récupérés")
+    else if (text.includes("non") && (text.includes("récupéré") || text.includes("recupere"))) {
+      const prev = span.previousElementSibling?.textContent?.match(/\d+/);
+      const next = span.nextElementSibling?.textContent?.match(/\d+/);
+      const self = span.textContent?.match(/\d+/);
+      const parent = span.parentElement?.textContent?.match(/\d+/);
+      retourNonRecupere = prev ? parseInt(prev[0], 10) : next ? parseInt(next[0], 10) : self ? parseInt(self[0], 10) : parent ? parseInt(parent[0], 10) : 0;
+    }
+    // 4. Retours récupérés (en excluant strictement "non")
+    else if (!text.includes("non") && (text.includes("récupéré") || text.includes("recupere"))) {
+      const prev = span.previousElementSibling?.textContent?.match(/\d+/);
+      const next = span.nextElementSibling?.textContent?.match(/\d+/);
+      const self = span.textContent?.match(/\d+/);
+      const parent = span.parentElement?.textContent?.match(/\d+/);
+      retourRecupere = prev ? parseInt(prev[0], 10) : next ? parseInt(next[0], 10) : self ? parseInt(self[0], 10) : parent ? parseInt(parent[0], 10) : 0;
+    }
+  }
+
+  const totalColis = livree + nonLivree;
+
+  return {
+    name,
+    totalColis,
+    livree,
+    nonLivree,
+    retourRecupere,
+    retourNonRecupere,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+function parseRidersFromDOM() {
+  const rows = document.querySelectorAll(
+    ".js-tournee-info-container:not(#gofleet-restored-card)"
+  );
+  const deliveryBoys = [];
+  const cardsHtml = [];
+
+  rows.forEach((row) => {
+    try {
+      const boy = parseDeliveryBoyRow(row);
+      deliveryBoys.push(boy);
+      cardsHtml.push(row.outerHTML);
+    } catch (e) {
+      console.warn("Failed to parse row", e);
+    }
+  });
+
+  return { deliveryBoys, cardsHtml };
+}
+
+function renderRiderCardHtml(boy) {
+  return `
+    <div class="col-xl-4 col-lg-6 col-md-6 col-sm-12 mb-4 js-tournee-info-container" id="gofleet-restored-card">
+      <div class="card card-custom card-stretch gutter-b" style="border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.06); border: 1px solid #ebedf2; background: #fff;">
+        <div class="card-body pt-5 pb-5">
+          <div class="d-flex align-items-center mb-3">
+            <div class="symbol symbol-40 symbol-light-primary mr-3" style="width: 42px; height: 42px; border-radius: 10px; background: #e1f0ff; display: flex; align-items: center; justify-content: center; font-size: 18px; margin-right: 12px;">
+              🛵
+            </div>
+            <div class="d-flex flex-column flex-grow-1">
+              <span class="text-dark-75 font-weight-bolder font-size-h6" style="font-weight: 700; color: #181c32; font-size: 15px;">
+                ${boy.name}
+              </span>
+              <span class="text-muted font-size-sm" style="font-size: 12px; color: #7e8299;">Total colis : <strong style="color: #3f4254;">${boy.totalColis}</strong></span>
+            </div>
+          </div>
+          <div class="separator separator-dashed my-3" style="border-bottom: 1px dashed #ebedf2; margin: 10px 0;"></div>
+          <div class="d-flex justify-content-between align-items-center mb-2" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span class="text-muted font-weight-bold" style="color: #7e8299; font-weight: 600;">Livrées :</span>
+            <span class="text-success font-weight-bold" style="font-size:25px; color: #1bc5bd !important; font-weight: 700;">${boy.livree}</span>
+          </div>
+          <div class="d-flex justify-content-between align-items-center mb-2" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span class="text-muted font-weight-bold" style="color: #7e8299; font-weight: 600;">Non Livrées :</span>
+            <span class="font-weight-bold" style="font-size:25px; color: #D70073 !important; font-weight: 700;">${boy.nonLivree}</span>
+          </div>
+          <div class="separator separator-dashed my-2" style="border-bottom: 1px dashed #ebedf2; margin: 8px 0;"></div>
+          <div class="d-flex justify-content-between align-items-center font-size-sm" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
+            <span class="font-weight-bold" style="color: #3f4254; font-weight: 600;">Retours récupérés :</span>
+            <span class="text-success font-weight-bold" style="font-size:13px; color: #1bc5bd !important; font-weight: 700;">${boy.retourRecupere}</span>
+          </div>
+          <div class="d-flex justify-content-between align-items-center font-size-sm mt-1" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px; margin-top: 4px;">
+            <span class="font-weight-500" style="color: #7e8299;">Non Récupérés :</span>
+            <span class="text-danger font-weight-bold" style="font-size:13px; color: #f64e60 !important; font-weight: 700;">${boy.retourNonRecupere}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function downloadQuickExcel(deliveryBoys, dateStr) {
+  let table = `<table border="1">
+    <tr style="background:#4A6CF7;color:white;font-weight:bold;">
+      <th>Livreur</th><th>Total Colis</th><th>Livrées</th><th>Non Livrées</th><th>Retours Récupérés</th><th>Retours Non Récupérés</th>
+    </tr>`;
+  let tot = 0, liv = 0, nliv = 0, ret = 0, nret = 0;
+  deliveryBoys.forEach((d) => {
+    tot += Number(d.totalColis) || 0;
+    liv += Number(d.livree) || 0;
+    nliv += Number(d.nonLivree) || 0;
+    ret += Number(d.retourRecupere) || 0;
+    nret += Number(d.retourNonRecupere) || 0;
+    table += `<tr>
+      <td>${d.name}</td><td>${d.totalColis}</td><td>${d.livree}</td><td>${d.nonLivree}</td><td>${d.retourRecupere}</td><td>${d.retourNonRecupere}</td>
+    </tr>`;
+  });
+  table += `<tr style="font-weight:bold;background:#f2f2f2;">
+    <td>TOTAL</td><td>${tot}</td><td>${liv}</td><td>${nliv}</td><td>${ret}</td><td>${nret}</td>
+  </tr></table>`;
+
+  const blob = new Blob([`\uFEFF${table}`], {
+    type: "application/vnd.ms-excel;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `EXPORT_LIVREUR_${dateStr}.xls`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, 100);
+}
+
+function findTourneeMountPoint() {
+  const existingRows = document.querySelectorAll(
+    ".js-tournee-info-container:not(#gofleet-restored-card)"
+  );
+  if (existingRows.length > 0) {
+    return existingRows[0].parentElement;
+  }
+
+  let mount = document.getElementById("gofleet-tournee-mount");
+  if (mount) return mount;
+
+  // 1. Try to find the filter card/container containing the date input or search input
+  const dateInput = document.querySelector(
+    "input[name='dateFilter'], input#dateFilter, input[type='date']"
+  );
+  const searchInput = document.querySelector(
+    "input[placeholder*='Cherch'], input[name*='search'], input[type='search']"
+  );
+  const filterEl = dateInput || searchInput;
+  if (filterEl) {
+    const filterCard = filterEl.closest(".card, .card-custom, form, .row");
+    if (filterCard && filterCard.parentElement) {
+      mount = document.createElement("div");
+      mount.id = "gofleet-tournee-mount";
+      mount.className = "w-100 mt-4";
+      filterCard.insertAdjacentElement("afterend", mount);
+      return mount;
+    }
+  }
+
+  // 2. Try form
+  const form = document.querySelector(
+    "form[action*='/Caissier/Caissier'], form"
+  );
+  if (form) {
+    const card = form.closest(".card") || form;
+    if (card && card.parentElement) {
+      mount = document.createElement("div");
+      mount.id = "gofleet-tournee-mount";
+      mount.className = "w-100 mt-4";
+      card.insertAdjacentElement("afterend", mount);
+      return mount;
+    }
+  }
+
+  // 3. Main content container (BEFORE footer)
+  const footer = document.querySelector("#kt_footer, .footer, footer");
+  const mainContent = document.querySelector(
+    "#kt_content .container, #kt_content .container-fluid, .content .container, .content, #kt_content"
+  );
+
+  mount = document.createElement("div");
+  mount.id = "gofleet-tournee-mount";
+  mount.className = "w-100 mt-4";
+
+  if (mainContent) {
+    mainContent.appendChild(mount);
+  } else if (footer && footer.parentElement) {
+    footer.parentElement.insertBefore(mount, footer);
+  } else {
+    document.body.appendChild(mount);
+  }
+  return mount;
+}
+
+function showAutoSaveBadge(count, dateStr) {
+  let badge = document.getElementById("gofleet-auto-save-badge");
+  if (!badge) {
+    badge = document.createElement("div");
+    badge.id = "gofleet-auto-save-badge";
+    badge.style.cssText = `
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: linear-gradient(135deg, #1bc5bd 0%, #0bb7af 100%);
+      color: white;
+      padding: 10px 20px;
+      border-radius: 30px;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 4px 15px rgba(27, 197, 189, 0.4);
+      z-index: 99999;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: opacity 0.5s ease, transform 0.5s ease;
+    `;
+    document.body.appendChild(badge);
+  }
+  badge.innerHTML = `✅ GoFleet : <strong>${count} livreur(s)</strong> archivé(s) (${dateStr})`;
+  setTimeout(() => {
+    if (badge) {
+      badge.style.opacity = "0";
+      badge.style.transform = "translateY(10px)";
+      setTimeout(() => badge.remove(), 500);
+    }
+  }, 4500);
+}
+
+function restoreRidersOnPage(saved) {
+  const mount = findTourneeMountPoint();
+  if (!mount) return;
+
+  // Scoped styles to enforce 100% full-width cards and clean vertical layout
+  const styleId = "gofleet-history-styles";
+  if (!document.getElementById(styleId)) {
+    const style = document.createElement("style");
+    style.id = styleId;
+    style.textContent = `
+      #gofleet-tournee-mount {
+        width: 100% !important;
+        margin-top: 15px !important;
+        margin-bottom: 30px !important;
+        display: block !important;
+      }
+      #gofleet-history-cards-wrapper {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 14px !important;
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      #gofleet-history-cards-wrapper .gofleet-history-card-item {
+        width: 100% !important;
+        max-width: 100% !important;
+        display: block !important;
+        clear: both !important;
+        box-sizing: border-box !important;
+      }
+      #gofleet-history-cards-wrapper .js-tournee-info-container {
+        width: 100% !important;
+        max-width: 100% !important;
+        display: block !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+        margin-bottom: 0 !important;
+        box-sizing: border-box !important;
+      }
+      #gofleet-history-cards-wrapper .js-tournee-info-container > * {
+        box-sizing: border-box !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  document.getElementById("gofleet-history-banner")?.remove();
+  document.getElementById("gofleet-history-cards-wrapper")?.remove();
+  document.getElementById("gofleet-history-notice")?.remove();
+
+  const banner = document.createElement("div");
+  banner.id = "gofleet-history-banner";
+  banner.style.cssText = `
+    width: 100%;
+    background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+    color: white;
+    padding: 14px 22px;
+    border-radius: 12px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 4px 15px rgba(30, 60, 114, 0.25);
+    font-family: inherit;
+    box-sizing: border-box;
+    z-index: 10;
+  `;
+
+  banner.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 14px;">
+      <span style="font-size: 26px;">📦</span>
+      <div>
+        <div style="font-weight: 700; font-size: 15px; letter-spacing: 0.3px;">
+          Historique GoFleet Enhancer restauré
+        </div>
+        <div style="font-size: 13px; opacity: 0.9; margin-top: 2px;">
+          Date : <strong>${saved.date}</strong> &nbsp;•&nbsp; <strong>${saved.deliveryBoys.length} livreur(s)</strong> sauvegardé(s)
+        </div>
+      </div>
+    </div>
+    <button id="gofleet-btn-export-direct" type="button" style="
+      background: linear-gradient(135deg, #28a745, #218838);
+      color: white;
+      border: none;
+      padding: 9px 18px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    ">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+        <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+        <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
+      </svg>
+      Exporter Excel (${saved.date})
+    </button>
+  `;
+
+  const cardsWrapper = document.createElement("div");
+  cardsWrapper.id = "gofleet-history-cards-wrapper";
+
+  if (saved.cardsHtml && saved.cardsHtml.length > 0) {
+    cardsWrapper.innerHTML = saved.cardsHtml
+      .map(
+        (html) => `<div class="gofleet-history-card-item">${html}</div>`
+      )
+      .join("");
+  } else {
+    cardsWrapper.innerHTML = `
+      <div class="row w-100 m-0">
+        ${saved.deliveryBoys.map((boy) => renderRiderCardHtml(boy)).join("")}
+      </div>
+    `;
+  }
+
+  mount.appendChild(banner);
+  mount.appendChild(cardsWrapper);
+
+  chrome.storage.local.set({ deliveryBoys: saved.deliveryBoys });
+
+  const exportBtn = banner.querySelector("#gofleet-btn-export-direct");
+  if (exportBtn) {
+    exportBtn.addEventListener("click", () => {
+      downloadQuickExcel(saved.deliveryBoys, saved.date);
+    });
+  }
+}
+
+function showEmptyHistoryNotice(dateStr) {
+  const mount = findTourneeMountPoint();
+  if (!mount) return;
+
+  document.getElementById("gofleet-history-banner")?.remove();
+  document.getElementById("gofleet-history-cards-wrapper")?.remove();
+  document.getElementById("gofleet-history-notice")?.remove();
+
+  const notice = document.createElement("div");
+  notice.id = "gofleet-history-notice";
+  notice.style.cssText = `
+    width: 100%;
+    background: #fff8dd;
+    color: #b58105;
+    border: 1px solid #ffeeba;
+    padding: 16px 20px;
+    border-radius: 12px;
+    margin-top: 15px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    font-size: 13.5px;
+    box-sizing: border-box;
+  `;
+  notice.innerHTML = `
+    <span style="font-size: 24px; line-height: 1;">ℹ️</span>
+    <div>
+      <div style="font-weight: 700; font-size: 14.5px; margin-bottom: 4px;">
+        Aucune donnée archivée pour le ${dateStr}
+      </div>
+      <div>
+        Le serveur TMS n'affiche pas les tournées déjà clôturées pour cette date.<br/>
+        GoFleet Enhancer enregistre automatiquement les données chaque jour dès que vous ouvrez la page pendant la tournée.
+      </div>
+    </div>
+  `;
+  mount.appendChild(notice);
+}
+
+var caissierProcessedDate = null;
+function handleCaissierPage() {
+  if (!isCaissierPage()) return;
+
+  const dateFilter = getCaissierDateFilter();
+  const rows = document.querySelectorAll(
+    ".js-tournee-info-container:not(#gofleet-restored-card)"
+  );
+
+  if (rows.length > 0) {
+    // Live riders on page -> Clean up any restored banner or cards from prior history view
+    document.getElementById("gofleet-history-banner")?.remove();
+    document.getElementById("gofleet-history-cards-wrapper")?.remove();
+    document.getElementById("gofleet-history-notice")?.remove();
+
+    // Auto-archive live riders
+    const { deliveryBoys, cardsHtml } = parseRidersFromDOM();
+    if (deliveryBoys.length > 0) {
+      chrome.storage.local.get({ caissier_history: {} }, (res) => {
+        const history = res.caissier_history || {};
+        history[dateFilter] = {
+          date: dateFilter,
+          updatedAt: new Date().toISOString(),
+          deliveryBoys,
+          cardsHtml,
+        };
+        chrome.storage.local.set({ caissier_history: history, deliveryBoys }, () => {
+          console.log(
+            `[GoFleet Enhancer] Sauvegarde automatique : ${deliveryBoys.length} livreurs pour le ${dateFilter}`
+          );
+          if (caissierProcessedDate !== dateFilter) {
+            caissierProcessedDate = dateFilter;
+            showAutoSaveBadge(deliveryBoys.length, dateFilter);
+          }
+        });
+      });
+    }
+  } else {
+    // 0 riders returned by server -> Check history for this date!
+    chrome.storage.local.get({ caissier_history: {} }, (res) => {
+      const history = res.caissier_history || {};
+      const saved = history[dateFilter];
+      if (saved && saved.deliveryBoys && saved.deliveryBoys.length > 0) {
+        console.log(
+          `[GoFleet Enhancer] Restauration de ${saved.deliveryBoys.length} livreurs pour le ${dateFilter}`
+        );
+        restoreRidersOnPage(saved);
+      } else {
+        showEmptyHistoryNotice(dateFilter);
+      }
+    });
+  }
+}
+
+if (isCaissierPage()) {
+  setTimeout(handleCaissierPage, 600);
+  setTimeout(handleCaissierPage, 1800);
+  setTimeout(handleCaissierPage, 3500);
+
+  document.addEventListener("change", (e) => {
+    if (
+      isCaissierPage() &&
+      e.target &&
+      (e.target.matches("input[name='dateFilter'], input#dateFilter, input[type='date']") ||
+        e.target.closest("input[name='dateFilter'], input#dateFilter, input[type='date']"))
+    ) {
+      document.getElementById("gofleet-history-banner")?.remove();
+      document.getElementById("gofleet-history-cards-wrapper")?.remove();
+      document.getElementById("gofleet-history-notice")?.remove();
+      setTimeout(handleCaissierPage, 600);
+      setTimeout(handleCaissierPage, 1600);
+    }
+  });
+
+  if (document.body && document.body instanceof Node) {
+    var caissierObserver = new MutationObserver(() => {
+      if (
+        !document.getElementById("gofleet-history-cards-wrapper") &&
+        !document.getElementById("gofleet-history-notice")
+      ) {
+        handleCaissierPage();
+      }
+    });
+    caissierObserver.observe(document.body, { childList: true, subtree: true });
+  }
+}
+// --- End Caissier History & Snapshot Module ---
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "collectDeliveryBoyData") {
     const rows = document.querySelectorAll(".js-tournee-info-container");
@@ -1043,69 +1601,44 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     rows.forEach((row) => {
       try {
-        const name =
-          row.querySelector(".text-dark-75")?.textContent.trim() || "N/A";
-
-        const livree = parseInt(
-          row
-            .querySelector(
-              "span.text-success.font-weight-bold[style*='font-size:25px']"
-            )
-            ?.textContent.trim() || "0"
-        );
-
-        const retourRecupere = parseInt(
-          row
-            .querySelectorAll(
-              "span.text-success.font-weight-bold[style*='font-size:13px']"
-            )?.[0]
-            ?.textContent.trim() || "0"
-        );
-
-        const nonLivree = parseInt(
-          row
-            .querySelector(
-              "span.font-weight-bold[style*='font-size:25px'][style*='D70073']"
-            )
-            ?.textContent.trim() || "0"
-        );
-
-        const retourNonRecupere = parseInt(
-          Array.from(
-            row.querySelectorAll("span.font-weight-bold, span.font-weight-500")
-          )
-            .find((span) =>
-              span.textContent
-                .replace(/\s+/g, " ")
-                .trim()
-                .includes("Non Récupérés")
-            )
-            ?.previousElementSibling?.textContent.match(/\d+/)?.[0] || "0"
-        );
-
-        const totalColis = livree + nonLivree;
-
-        deliveryBoys.push({
-          name,
-          totalColis,
-          livree,
-          retourRecupere,
-          nonLivree,
-          retourNonRecupere,
-          timestamp: new Date().toISOString(),
-        });
+        const boy = parseDeliveryBoyRow(row);
+        deliveryBoys.push(boy);
       } catch (e) {
         console.warn("Failed to parse row", e);
       }
     });
 
+    const currentDate = isCaissierPage()
+      ? getCaissierDateFilter()
+      : new Date().toISOString().split("T")[0];
+
     if (deliveryBoys.length === 0) {
-      console.error("No data found for delivery boys.");
-      sendResponse({ status: "error", message: "Aucune donnée trouvée." });
+      // Fallback to history for current selected date
+      chrome.storage.local.get({ caissier_history: {} }, (result) => {
+        const history = result.caissier_history || {};
+        const saved = history[currentDate];
+        if (saved && saved.deliveryBoys && saved.deliveryBoys.length > 0) {
+          chrome.storage.local.set({ deliveryBoys: saved.deliveryBoys }, () => {
+            sendResponse({
+              status: "ok",
+              deliveryBoys: saved.deliveryBoys,
+              date: currentDate,
+              fromHistory: true,
+            });
+          });
+        } else {
+          console.error("No data found for delivery boys.");
+          sendResponse({
+            status: "error",
+            message: `Aucune donnée trouvée pour le ${currentDate}.`,
+          });
+        }
+      });
+      return true; // Keep channel open for async response
     } else {
       chrome.storage.local.set({ deliveryBoys }, () => {
         console.log("Delivery data saved:", deliveryBoys);
-        sendResponse({ status: "ok", deliveryBoys });
+        sendResponse({ status: "ok", deliveryBoys, date: currentDate });
       });
     }
 
@@ -1231,35 +1764,46 @@ chrome.runtime.onMessage.addListener((msg) => {
   }
 });
 
-var modalObserver = new MutationObserver(() => {
-  const modalBody = document.getElementById(
-    "js-affectation-coliszone-modal-body"
-  );
-  if (!modalBody) return;
+var modalObserver = null;
+if (
+  document.body &&
+  document.body instanceof Node &&
+  (document.getElementById("js-affectation-coliszone-modal-body") ||
+    window.location.pathname.toLowerCase().includes("affectation") ||
+    window.location.pathname.toLowerCase().includes("tournee") ||
+    window.location.pathname.toLowerCase().includes("hub") ||
+    window.location.pathname.toLowerCase().includes("caissier"))
+) {
+  modalObserver = new MutationObserver(() => {
+    const modalBody = document.getElementById(
+      "js-affectation-coliszone-modal-body"
+    );
+    if (!modalBody) return;
 
-  const forbiddenImg = modalBody.querySelector(
-    '#js-colis-livreur-img[src$="forbidden.png"]'
-  );
-  const zoneText = modalBody.querySelector("#js-colis-livreur-zone-name-text");
-  const affectButton = document.getElementById("js-affect-colis-to-zone-btn");
-  console.log("Found button:", affectButton);
+    const forbiddenImg = modalBody.querySelector(
+      '#js-colis-livreur-img[src$="forbidden.png"]'
+    );
+    const zoneText = modalBody.querySelector("#js-colis-livreur-zone-name-text");
+    const affectButton = document.getElementById("js-affect-colis-to-zone-btn");
+    console.log("Found button:", affectButton);
 
-  if (
-    forbiddenImg &&
-    zoneText &&
-    zoneText.textContent.includes("Zone Expédition vers l'entrepôt") &&
-    affectButton &&
-    affectButton.style.display !== "none"
-  ) {
-    console.log("🚫 Forbidden zone detected, hiding affect button");
-    affectButton.remove();
-  }
-});
+    if (
+      forbiddenImg &&
+      zoneText &&
+      zoneText.textContent.includes("Zone Expédition vers l'entrepôt") &&
+      affectButton &&
+      affectButton.style.display !== "none"
+    ) {
+      console.log("🚫 Forbidden zone detected, hiding affect button");
+      affectButton.remove();
+    }
+  });
 
-modalObserver.observe(document.body, {
-  childList: true,
-  subtree: true,
-});
+  modalObserver.observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
+}
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "searchTracking") {
@@ -1331,9 +1875,146 @@ function parseJsonDateTime(dateStr, timeStr) {
   return new Date(year, month - 1, day, hour, minute);
 }
 
+// --- Start Consultation & Traitement Livreur parcel & calls check ---
+function extractClientName(rootItem, card) {
+  // 1. Try from API rootItem or json
+  if (rootItem && typeof rootItem === "object") {
+    const candidate = rootItem.Client ||
+                      rootItem.NomClient ||
+                      rootItem.Nom_Client ||
+                      rootItem.Destinataire ||
+                      rootItem.NomDestinataire ||
+                      rootItem.Nom_Destinataire ||
+                      rootItem.CustomerName ||
+                      rootItem.Customer ||
+                      rootItem.ClientName ||
+                      rootItem.ReceiverName ||
+                      rootItem.Consignee ||
+                      rootItem.Nom ||
+                      (rootItem.Colis && (rootItem.Colis.Client || rootItem.Colis.NomClient || rootItem.Colis.Destinataire));
+    if (candidate && typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  // 2. Try from card DOM
+  if (card && card.querySelector) {
+    const attrName = card.getAttribute("data-client") ||
+                     card.getAttribute("data-clientname") ||
+                     card.getAttribute("data-destinataire") ||
+                     card.getAttribute("data-customer");
+    if (attrName && attrName.trim()) return attrName.trim();
+
+    const selectors = [
+      ".js-client-name",
+      ".client-name",
+      ".client",
+      ".nom-client",
+      ".js-destinataire",
+      ".destinataire",
+      ".customer-name",
+      ".customer"
+    ];
+    for (const sel of selectors) {
+      const el = card.querySelector(sel);
+      if (el && el.textContent.trim()) {
+        const text = el.textContent.replace(/^client\s*[:：]?\s*/i, "").replace(/^destinataire\s*[:：]?\s*/i, "").trim();
+        if (text) return text;
+      }
+    }
+
+    const elements = card.querySelectorAll("p, span, div, label, td, b, strong");
+    for (const el of elements) {
+      if (el.children.length === 0) {
+        const text = el.textContent.trim();
+        const match = text.match(/(?:client|destinataire|dest|nom)\s*[:：]\s*([A-Za-zÀ-ÿ\s'-]{2,})/i);
+        if (match && match[1]) {
+          return match[1].trim();
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function extractPrice(rootItem, card) {
+  // 1. Try from API rootItem
+  if (rootItem && typeof rootItem === "object") {
+    const candidate = rootItem.Prix != null ? rootItem.Prix :
+                     (rootItem.Montant != null ? rootItem.Montant :
+                     (rootItem.CRBT != null ? rootItem.CRBT :
+                     (rootItem.MontantCRBT != null ? rootItem.MontantCRBT :
+                     (rootItem.Price != null ? rootItem.Price :
+                     (rootItem.Total != null ? rootItem.Total :
+                     (rootItem.Valeur != null ? rootItem.Valeur :
+                     (rootItem.MontantTotal != null ? rootItem.MontantTotal :
+                     (rootItem.PrixTotal != null ? rootItem.PrixTotal :
+                     (rootItem.CodAmount != null ? rootItem.CodAmount :
+                     (rootItem.Colis && (rootItem.Colis.Prix || rootItem.Colis.Montant || rootItem.Colis.CRBT)))))))))));
+    if (candidate !== null && candidate !== undefined && candidate !== "") {
+      const num = parseFloat(String(candidate).replace(/[^\d.,]/g, "").replace(",", "."));
+      if (!isNaN(num)) {
+        return `${num.toFixed(2)} DH`;
+      }
+      return String(candidate).trim();
+    }
+  }
+
+  // 2. Try from card DOM
+  if (card && card.querySelector) {
+    const attrPrice = card.getAttribute("data-price") ||
+                      card.getAttribute("data-prix") ||
+                      card.getAttribute("data-montant") ||
+                      card.getAttribute("data-crbt");
+    if (attrPrice && attrPrice.trim()) {
+      const num = parseFloat(attrPrice.replace(/[^\d.,]/g, "").replace(",", "."));
+      if (!isNaN(num)) return `${num.toFixed(2)} DH`;
+      return attrPrice.trim();
+    }
+
+    const selectors = [
+      ".js-prix",
+      ".prix",
+      ".price",
+      ".montant",
+      ".crbt",
+      ".js-crbt",
+      ".js-montant"
+    ];
+    for (const sel of selectors) {
+      const el = card.querySelector(sel);
+      if (el && el.textContent.trim()) {
+        const text = el.textContent.trim();
+        const num = parseFloat(text.replace(/[^\d.,]/g, "").replace(",", "."));
+        if (!isNaN(num)) return `${num.toFixed(2)} DH`;
+        return text;
+      }
+    }
+
+    const elements = card.querySelectorAll("p, span, div, label, td, b, strong");
+    for (const el of elements) {
+      if (el.children.length === 0) {
+        const text = el.textContent.trim();
+        const match = text.match(/(?:crbt|prix|montant|total)\s*[:：]?\s*([\d\s.,]+)\s*(?:dh|mad)?/i) ||
+                      text.match(/\b([\d\s.,]+)\s*(?:dh|mad)\b/i);
+        if (match && match[1]) {
+          const num = parseFloat(match[1].replace(/\s/g, "").replace(",", "."));
+          if (!isNaN(num)) {
+            return `${num.toFixed(2)} DH`;
+          }
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 function processConsultationPageCalls() {
-  if (!window.location.pathname.includes("/Hub/Consultation/") &&
-      !window.location.pathname.includes("/Caissier/Caissier/TraitementLivreurExcute")) {
+  const currentPath = window.location.pathname.toLowerCase();
+  if (!currentPath.includes("/hub/consultation/") &&
+      !currentPath.includes("/caissier/caissier/traitementlivreurexcute")) {
     return;
   }
   
@@ -1342,7 +2023,8 @@ function processConsultationPageCalls() {
 
   cards.forEach(async (card) => {
     card.classList.add("calls-processed");
-    const colinum = card.getAttribute("data-colinum");
+    const colinum = card.getAttribute("data-colinum") ||
+                    card.querySelector("h6.style-87")?.textContent?.replace("Colis N°", "").trim();
     if (!colinum) return;
     
     const apiColisNum = colinum.endsWith("A") ? colinum : colinum + "A";
@@ -1351,124 +2033,277 @@ function processConsultationPageCalls() {
       const response = await fetch(`https://tms.marjanemall.ma/AffectationLivreur/Affectation/GetColisHistorique?cab=${apiColisNum}`, { credentials: "include" });
       const json = await response.json();
       
+      let rootItem = null;
       let details = [];
-      if (json.Success && json.data && Array.isArray(json.data.detail)) {
-        details = json.data.detail;
-      } else if (json.Success && Array.isArray(json.data)) {
-        const item = json.data.find(d => (d.ColisNum || "").trim() === apiColisNum || (d.TrackingCode || "").trim() === apiColisNum);
-        if (item && Array.isArray(item.detail)) details = item.detail;
+      if (json && json.Success && json.data) {
+        if (Array.isArray(json.data.detail)) {
+          details = json.data.detail;
+          rootItem = json.data;
+        } else if (Array.isArray(json.data)) {
+          rootItem = json.data.find(d => 
+            (d.ColisNum || "").trim() === apiColisNum || 
+            (d.TrackingCode || "").trim() === apiColisNum ||
+            (d.ColisNum || "").trim() === colinum || 
+            (d.TrackingCode || "").trim() === colinum
+          ) || json.data[0];
+          if (rootItem && Array.isArray(rootItem.detail)) {
+            details = rootItem.detail;
+          }
+        } else if (typeof json.data === "object") {
+          rootItem = json.data;
+          if (Array.isArray(json.data.detail)) details = json.data.detail;
+        }
       }
-      
-      if (!details || details.length === 0) return;
+
+      const clientName = extractClientName(rootItem || (json && json.data) || json, card);
+      const price = extractPrice(rootItem || (json && json.data) || json, card);
 
       const deliveryAttempts = [];
       let currentAttempt = null;
       
-      details.forEach(item => {
-        const status = item.ColisStatut || "";
-        
-        if (status.includes("Pris en charge livreur")) {
-          currentAttempt = {
-            date: parseJsonDateTime(item.DateColis, item.TimeColis),
-            injoignableItems: []
-          };
-          deliveryAttempts.push(currentAttempt);
-        }
-        
-        if (status.includes("Injoignable") && currentAttempt) {
-          const date = parseJsonDateTime(item.DateColis, item.TimeColis);
-          currentAttempt.injoignableItems.push({ date, item });
-        }
-      });
+      if (Array.isArray(details)) {
+        details.forEach(item => {
+          const status = item.ColisStatut || "";
+          
+          if (status.includes("Pris en charge livreur")) {
+            currentAttempt = {
+              date: parseJsonDateTime(item.DateColis, item.TimeColis),
+              injoignableItems: []
+            };
+            deliveryAttempts.push(currentAttempt);
+          }
+          
+          if (status.includes("Injoignable") && currentAttempt) {
+            const date = parseJsonDateTime(item.DateColis, item.TimeColis);
+            currentAttempt.injoignableItems.push({ date, item });
+          }
+        });
+      }
       
-      if (deliveryAttempts.length === 0) return;
+      if (deliveryAttempts.length === 0 && !clientName && !price) return;
 
       const container = document.createElement("div");
-      container.style.marginTop = "12px";
-      container.style.paddingTop = "12px";
-      container.style.borderTop = "1px dashed rgba(0,0,0,0.15)";
-      container.style.display = "flex";
-      container.style.flexWrap = "wrap";
-      container.style.gap = "8px";
-      
-      deliveryAttempts.forEach((attempt, index) => {
-        const injoignableItems = attempt.injoignableItems;
-        
-        // Determine overall status for this attempt to style the pill
-        let hasInvalidCall = false;
-        
-        for (let i = 1; i < injoignableItems.length; i++) {
-          const timeDiff = (injoignableItems[i].date - injoignableItems[i - 1].date) / 60000;
-          if (timeDiff < 90) hasInvalidCall = true;
-        }
-        
-        const isSuccess = injoignableItems.length >= 3 && !hasInvalidCall;
-        const isWarning = injoignableItems.length > 0 && !isSuccess;
-        
-        const bgColor = isSuccess ? "#e8f5e9" : (isWarning ? "#fff3e0" : "#f5f5f5");
-        const borderColor = isSuccess ? "#c8e6c9" : (isWarning ? "#ffe0b2" : "#e0e0e0");
-        const textColor = isSuccess ? "#2e7d32" : (isWarning ? "#e65100" : "#616161");
-
-        const attemptDiv = document.createElement("div");
-        attemptDiv.style.display = "inline-flex";
-        attemptDiv.style.alignItems = "center";
-        attemptDiv.style.backgroundColor = bgColor;
-        attemptDiv.style.border = `1px solid ${borderColor}`;
-        attemptDiv.style.borderRadius = "30px";
-        attemptDiv.style.padding = "4px 12px";
-        attemptDiv.style.fontSize = "12.5px";
-        attemptDiv.style.color = textColor;
-        attemptDiv.style.boxShadow = "0 1px 2px rgba(0,0,0,0.05)";
-        
-        const dateStr = isNaN(attempt.date) ? "" : `${String(attempt.date.getDate()).padStart(2, '0')}/${String(attempt.date.getMonth() + 1).padStart(2, '0')}`;
-        
-        const titleSpan = document.createElement("strong");
-        titleSpan.style.marginRight = "6px";
-        titleSpan.textContent = `T${index + 1} (${dateStr}):`;
-        
-        const iconsSpan = document.createElement("span");
-        iconsSpan.style.display = "flex";
-        iconsSpan.style.alignItems = "center";
-        iconsSpan.style.gap = "4px";
-        
-        if (injoignableItems.length === 0) {
-          iconsSpan.textContent = "0 appel";
-          iconsSpan.style.opacity = "0.7";
-        } else {
-          const textNode = document.createTextNode(`${injoignableItems.length} appel${injoignableItems.length > 1 ? 's' : ''} (`);
-          iconsSpan.appendChild(textNode);
-          
-          injoignableItems.forEach((item, i) => {
-            const timeStr = `${String(item.date.getHours()).padStart(2, '0')}:${String(item.date.getMinutes()).padStart(2, '0')}`;
-            const timeSpan = document.createElement("span");
-            timeSpan.textContent = timeStr;
-            iconsSpan.appendChild(timeSpan);
-            
-            if (i > 0) {
-              const timeDiff = (item.date - injoignableItems[i - 1].date) / 60000;
-              const icon = timeDiff >= 90 ? "✅" : "❌";
-              const iconSpan = document.createElement("span");
-              iconSpan.textContent = icon;
-              iconSpan.title = `Écart: ${Math.round(timeDiff)} min`;
-              iconSpan.style.marginLeft = "2px";
-              iconsSpan.appendChild(iconSpan);
-            }
-            
-            if (i < injoignableItems.length - 1) {
-              const sepNode = document.createTextNode(" - ");
-              iconsSpan.appendChild(sepNode);
-            }
-          });
-          
-          const closeParenNode = document.createTextNode(")");
-          iconsSpan.appendChild(closeParenNode);
-        }
-        
-        attemptDiv.appendChild(titleSpan);
-        attemptDiv.appendChild(iconsSpan);
-        container.appendChild(attemptDiv);
+      container.className = "gof-colis-enhancement";
+      Object.assign(container.style, {
+        marginTop: "12px",
+        padding: "10px 14px",
+        background: "#f8fafc",
+        border: "1px solid #e2e8f0",
+        borderRadius: "10px",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px"
       });
-      
+
+      // 1. Parcel Header (Client Name & Price)
+      if (clientName || price) {
+        const headerRow = document.createElement("div");
+        Object.assign(headerRow.style, {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "8px",
+          paddingBottom: deliveryAttempts.length > 0 ? "8px" : "0",
+          borderBottom: deliveryAttempts.length > 0 ? "1px solid #e2e8f0" : "none"
+        });
+
+        if (clientName) {
+          const clientDiv = document.createElement("div");
+          Object.assign(clientDiv.style, {
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            fontSize: "12.5px",
+            color: "#334155"
+          });
+          clientDiv.innerHTML = `
+            <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#e0e7ff;color:#4338ca;font-size:12px;">👤</span>
+            <span>Client : <strong style="color: #0f172a; font-weight: 700;">${clientName}</strong></span>
+          `;
+          headerRow.appendChild(clientDiv);
+        }
+
+        if (price) {
+          const priceDiv = document.createElement("div");
+          Object.assign(priceDiv.style, {
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "5px",
+            padding: "3px 10px",
+            background: "#ecfdf5",
+            color: "#047857",
+            border: "1px solid #a7f3d0",
+            borderRadius: "14px",
+            fontSize: "12.5px",
+            fontWeight: "700"
+          });
+          priceDiv.innerHTML = `
+            <span>💰</span>
+            <span>${price}</span>
+          `;
+          headerRow.appendChild(priceDiv);
+        }
+
+        container.appendChild(headerRow);
+      }
+
+      // 2. Delivery Attempts Timeline
+      if (deliveryAttempts.length > 0) {
+        const attemptsWrapper = document.createElement("div");
+        Object.assign(attemptsWrapper.style, {
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "8px",
+          alignItems: "center"
+        });
+
+        deliveryAttempts.forEach((attempt, index) => {
+          const injoignableItems = attempt.injoignableItems;
+          const isZeroCalls = injoignableItems.length === 0;
+
+          let hasInvalidCall = false;
+          for (let i = 1; i < injoignableItems.length; i++) {
+            const timeDiff = (injoignableItems[i].date - injoignableItems[i - 1].date) / 60000;
+            if (timeDiff < 90) hasInvalidCall = true;
+          }
+
+          const isSuccess = injoignableItems.length >= 3 && !hasInvalidCall;
+          const isWarning = injoignableItems.length > 0 && !isSuccess;
+
+          const attemptCard = document.createElement("div");
+          Object.assign(attemptCard.style, {
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+            padding: "4px 10px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            transition: "all 0.2s ease",
+            boxShadow: "0 1px 2px rgba(0,0,0,0.03)"
+          });
+
+          const dateStr = isNaN(attempt.date) ? "" : `${String(attempt.date.getDate()).padStart(2, '0')}/${String(attempt.date.getMonth() + 1).padStart(2, '0')}`;
+
+          if (isZeroCalls) {
+            // Clean subtle neutral badge for 0 calls
+            attemptCard.style.backgroundColor = "#f1f5f9";
+            attemptCard.style.border = "1px solid #cbd5e1";
+            attemptCard.style.color = "#475569";
+
+            attemptCard.innerHTML = `
+              <span style="font-weight:700; color:#334155; background:#e2e8f0; padding:2px 6px; border-radius:4px; font-size:11px;">T${index + 1}${dateStr ? ` (${dateStr})` : ''}</span>
+              <span style="display:inline-flex; align-items:center; gap:5px; color:#64748b; font-weight:500;">
+                <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:#94a3b8;"></span>
+                Aucun appel
+              </span>
+            `;
+          } else {
+            // 1 or more calls
+            const theme = isSuccess
+              ? {
+                  bg: "#ecfdf5",
+                  border: "#a7f3d0",
+                  titleBg: "#dcfce7",
+                  titleColor: "#15803d",
+                  summaryColor: "#065f46"
+                }
+              : {
+                  bg: "#fffbeb",
+                  border: "#fde68a",
+                  titleBg: "#fef3c7",
+                  titleColor: "#b45309",
+                  summaryColor: "#92400e"
+                };
+
+            attemptCard.style.backgroundColor = theme.bg;
+            attemptCard.style.border = `1px solid ${theme.border}`;
+            attemptCard.style.color = theme.summaryColor;
+
+            const titleSpan = document.createElement("span");
+            Object.assign(titleSpan.style, {
+              fontWeight: "700",
+              color: theme.titleColor,
+              backgroundColor: theme.titleBg,
+              padding: "2px 6px",
+              borderRadius: "4px",
+              fontSize: "11px"
+            });
+            titleSpan.textContent = `T${index + 1}${dateStr ? ` (${dateStr})` : ''}`;
+            attemptCard.appendChild(titleSpan);
+
+            const callsSpan = document.createElement("span");
+            Object.assign(callsSpan.style, {
+              fontWeight: "700",
+              fontSize: "12px",
+              color: theme.summaryColor
+            });
+            callsSpan.textContent = `${injoignableItems.length} appel${injoignableItems.length > 1 ? 's' : ''}`;
+            attemptCard.appendChild(callsSpan);
+
+            const timelineSpan = document.createElement("span");
+            Object.assign(timelineSpan.style, {
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+              fontSize: "11.5px",
+              color: "#475569"
+            });
+
+            timelineSpan.appendChild(document.createTextNode("("));
+
+            injoignableItems.forEach((item, i) => {
+              const timeStr = `${String(item.date.getHours()).padStart(2, '0')}:${String(item.date.getMinutes()).padStart(2, '0')}`;
+              const timeEl = document.createElement("span");
+              timeEl.style.fontWeight = "600";
+              timeEl.style.color = "#1e293b";
+              timeEl.textContent = timeStr;
+              timelineSpan.appendChild(timeEl);
+
+              if (i > 0) {
+                const timeDiff = (item.date - injoignableItems[i - 1].date) / 60000;
+                const diffMinutes = Math.round(timeDiff);
+                const isValid = timeDiff >= 90;
+
+                const intervalBadge = document.createElement("span");
+                Object.assign(intervalBadge.style, {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  padding: "1px 5px",
+                  borderRadius: "4px",
+                  fontSize: "11px",
+                  fontWeight: "600",
+                  backgroundColor: isValid ? "#dcfce7" : "#fee2e2",
+                  color: isValid ? "#15803d" : "#b91c1c",
+                  border: `1px solid ${isValid ? '#86efac' : '#fca5a5'}`
+                });
+                intervalBadge.title = isValid
+                  ? `Intervalle valide : ${diffMinutes} min (>= 90 min)`
+                  : `Intervalle non respecté : ${diffMinutes} min (< 90 min)`;
+                intervalBadge.textContent = `${isValid ? '✅' : '❌'} ${diffMinutes}m`;
+                timelineSpan.appendChild(intervalBadge);
+              }
+
+              if (i < injoignableItems.length - 1) {
+                const arrow = document.createTextNode(" → ");
+                timelineSpan.appendChild(arrow);
+              }
+            });
+
+            timelineSpan.appendChild(document.createTextNode(")"));
+            attemptCard.appendChild(timelineSpan);
+          }
+
+          attemptsWrapper.appendChild(attemptCard);
+        });
+
+        container.appendChild(attemptsWrapper);
+      }
+
+      const existing = card.querySelector(".gof-colis-enhancement");
+      if (existing) existing.remove();
       card.appendChild(container);
       
     } catch (e) {
@@ -1477,15 +2312,21 @@ function processConsultationPageCalls() {
   });
 }
 
-var consultationObserver = new MutationObserver(() => {
-  if (window.location.pathname.includes("/Hub/Consultation/") ||
-      window.location.pathname.includes("/Caissier/Caissier/TraitementLivreurExcute")) {
+const currentPath = window.location.pathname.toLowerCase();
+var consultationObserver = null;
+if (
+  (currentPath.includes("/hub/consultation/") ||
+    currentPath.includes("/caissier/caissier/traitementlivreurexcute")) &&
+  document.body &&
+  document.body instanceof Node
+) {
+  consultationObserver = new MutationObserver(() => {
     processConsultationPageCalls();
-  }
-});
+  });
 
-consultationObserver.observe(document.body, { childList: true, subtree: true });
-setTimeout(processConsultationPageCalls, 1000);
+  consultationObserver.observe(document.body, { childList: true, subtree: true });
+  setTimeout(processConsultationPageCalls, 1000);
+}
 // --- End Consultation page calls check ---
 
 // --- Start Colis Counter ---
@@ -1540,14 +2381,23 @@ function updateColisCounter() {
   counterEl.textContent = `Total : ${count}`;
 }
 
-var colisCounterObserver = new MutationObserver((mutations) => {
-  if (window.location.pathname.includes("/TourneeMM/Expedition/EditPaletteWithColis")) {
-    const isSelfMutation = mutations.every(m => m.target.id === "gof-colis-counter" || (m.target.parentNode && m.target.parentNode.id === "gof-colis-counter"));
+var colisCounterObserver = null;
+if (
+  window.location.pathname.includes("/TourneeMM/Expedition/EditPaletteWithColis") &&
+  document.body &&
+  document.body instanceof Node
+) {
+  colisCounterObserver = new MutationObserver((mutations) => {
+    const isSelfMutation = mutations.every(
+      (m) =>
+        m.target.id === "gof-colis-counter" ||
+        (m.target.parentNode && m.target.parentNode.id === "gof-colis-counter")
+    );
     if (!isSelfMutation) {
       updateColisCounter();
     }
-  }
-});
-colisCounterObserver.observe(document.body, { childList: true, subtree: true });
-setTimeout(updateColisCounter, 1000);
+  });
+  colisCounterObserver.observe(document.body, { childList: true, subtree: true });
+  setTimeout(updateColisCounter, 1000);
+}
 // --- End Colis Counter ---

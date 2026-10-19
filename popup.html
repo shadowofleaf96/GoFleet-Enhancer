@@ -425,6 +425,21 @@
               </div>
             </button>
           </div>
+          <!-- Historique des livreurs date selector -->
+          <div id="livreurHistoryBox" style="background: white; padding: 10px 14px; border-radius: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #edf2f7; display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <span style="font-size: 12px; font-weight: 600; color: #4a5568; display: flex; align-items: center; gap: 6px;">
+                <i class="fa-solid fa-calendar-day" style="color: #4a6cf7;"></i>
+                Date d'export livreurs :
+              </span>
+              <span id="historyBadge" style="font-size: 10.5px; background: #e0e7ff; color: #4338ca; padding: 2px 8px; border-radius: 10px; font-weight: 600;">
+                ⚡ En direct
+              </span>
+            </div>
+            <select id="livreurDateSelect" style="width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid #cbd5e0; font-size: 12.5px; background: #f8fafc; color: #2d3748; cursor: pointer; outline: none; font-weight: 500;">
+              <option value="CURRENT">⚡ Date actuelle / Page ouverte</option>
+            </select>
+          </div>
           <div
             class="tracking-container"
             style="display: flex; flex-direction: column; gap: 10px"

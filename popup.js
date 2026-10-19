@@ -5,11 +5,18 @@ function formatDate(date = new Date()) {
   return `${day}/${month}/${year}`;
 }
 
-async function generateDeliveryExcel() {
+async function generateDeliveryExcel(customData = null, targetDateStr = null) {
   try {
-    const { deliveryBoys = [] } = await chrome.storage.local.get(
-      "deliveryBoys"
-    );
+    let deliveryBoys = customData;
+    if (!deliveryBoys || !deliveryBoys.length) {
+      const stored = await chrome.storage.local.get("deliveryBoys");
+      deliveryBoys = stored.deliveryBoys || [];
+    }
+
+    if (!deliveryBoys || !deliveryBoys.length) {
+      alert("Aucune donnée de livreur disponible pour l'export.");
+      return;
+    }
 
     const templatePath = chrome.runtime.getURL(
       "dummy-content/MARJANE-MALL-EXPORT-DATA.xlsx"
@@ -31,6 +38,12 @@ async function generateDeliveryExcel() {
 
     const startRow = 2;
 
+    let totalColisSum = 0;
+    let livreeSum = 0;
+    let nonLivreeSum = 0;
+    let retourRecupereSum = 0;
+    let retourNonRecupereSum = 0;
+
     deliveryBoys.forEach((entry, index) => {
       const row = startRow + index;
       sheet.cell(`A${row}`).value(entry.name);
@@ -39,17 +52,33 @@ async function generateDeliveryExcel() {
       sheet.cell(`D${row}`).value(entry.nonLivree);
       sheet.cell(`H${row}`).value(entry.retourRecupere);
       sheet.cell(`I${row}`).value(entry.retourNonRecupere);
+
+      totalColisSum += Number(entry.totalColis) || 0;
+      livreeSum += Number(entry.livree) || 0;
+      nonLivreeSum += Number(entry.nonLivree) || 0;
+      retourRecupereSum += Number(entry.retourRecupere) || 0;
+      retourNonRecupereSum += Number(entry.retourNonRecupere) || 0;
     });
+
+    if (deliveryBoys.length > 0) {
+      const totalRow = startRow + deliveryBoys.length;
+      sheet.cell(`A${totalRow}`).value("TOTAL");
+      sheet.cell(`B${totalRow}`).value(totalColisSum);
+      sheet.cell(`C${totalRow}`).value(livreeSum);
+      sheet.cell(`D${totalRow}`).value(nonLivreeSum);
+      sheet.cell(`H${totalRow}`).value(retourRecupereSum);
+      sheet.cell(`I${totalRow}`).value(retourNonRecupereSum);
+      sheet.range(`A${totalRow}:J${totalRow}`).style("bold", true);
+    }
 
     const blob = await workbook.outputAsync("blob");
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `EXPORT_LIVREUR_${formatDate()}.xlsx`;
+    const exportDateName = targetDateStr || formatDate();
+    a.download = `EXPORT_LIVREUR_${exportDateName}.xlsx`;
     document.body.appendChild(a);
     a.click();
-
-    await chrome.storage.local.remove("deliveryBoys");
 
     setTimeout(() => {
       document.body.removeChild(a);
@@ -388,24 +417,98 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   });
 
+  // Populate livreur history dates dropdown
+  const livreurSelect = document.getElementById("livreurDateSelect");
+  const historyBadge = document.getElementById("historyBadge");
+
+  chrome.storage.local.get({ caissier_history: {} }, (res) => {
+    const history = res.caissier_history || {};
+    if (!livreurSelect) return;
+
+    const dates = Object.keys(history).sort().reverse();
+    if (dates.length > 0) {
+      if (historyBadge) historyBadge.textContent = `${dates.length} date(s)`;
+      dates.forEach((d) => {
+        const opt = document.createElement("option");
+        opt.value = d;
+        const count = history[d]?.deliveryBoys?.length || 0;
+        opt.textContent = `📅 ${d} (${count} livreurs)`;
+        livreurSelect.appendChild(opt);
+      });
+    }
+  });
+
+  if (livreurSelect) {
+    livreurSelect.addEventListener("change", () => {
+      if (livreurSelect.value === "CURRENT") {
+        if (historyBadge) {
+          historyBadge.textContent = "⚡ En direct";
+          historyBadge.style.background = "#e0e7ff";
+          historyBadge.style.color = "#4338ca";
+        }
+      } else {
+        if (historyBadge) {
+          historyBadge.textContent = "📂 Archive";
+          historyBadge.style.background = "#fef3c7";
+          historyBadge.style.color = "#92400e";
+        }
+      }
+    });
+  }
+
   document
     .getElementById("exportLivreur")
     .addEventListener("click", async () => {
+      const selectedDate = livreurSelect?.value || "CURRENT";
+
+      // If user selected a specific historical date from dropdown
+      if (selectedDate !== "CURRENT") {
+        const { caissier_history = {} } = await chrome.storage.local.get(
+          "caissier_history"
+        );
+        const historyItem = caissier_history[selectedDate];
+        if (
+          historyItem &&
+          historyItem.deliveryBoys &&
+          historyItem.deliveryBoys.length > 0
+        ) {
+          await generateDeliveryExcel(historyItem.deliveryBoys, selectedDate);
+          alert(
+            `Export Excel réussi depuis l'historique pour le ${selectedDate} (${historyItem.deliveryBoys.length} livreurs) !`
+          );
+          return;
+        } else {
+          alert(
+            `Aucune donnée trouvée dans l'historique pour le ${selectedDate}.`
+          );
+          return;
+        }
+      }
+
+      // Default: Collect from active tab
       const [tab] = await chrome.tabs.query({
         active: true,
         currentWindow: true,
       });
+
+      if (!tab) {
+        alert("Aucun onglet actif trouvé.");
+        return;
+      }
 
       const result = await chrome.tabs.sendMessage(tab.id, {
         action: "collectDeliveryBoyData",
       });
 
       if (result?.status === "ok") {
-        alert("Données livreur récupérées avec succès !");
+        const msg = result.fromHistory
+          ? `Données livreur récupérées depuis l'historique (${result.date}) !`
+          : "Données livreur récupérées avec succès !";
+        alert(msg);
         console.log(result.deliveryBoys);
-        await generateDeliveryExcel();
+        await generateDeliveryExcel(result.deliveryBoys, result.date);
       } else {
-        alert("Échec de la récupération des données.");
+        alert(result?.message || "Échec de la récupération des données.");
       }
     });
 
