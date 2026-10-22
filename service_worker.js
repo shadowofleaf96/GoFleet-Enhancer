@@ -17,7 +17,8 @@ let currentTabId = null;
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (
     changeInfo.status === "complete" &&
-    tab.url.includes("TraitementLivreurExcute")
+    tab.url &&
+    tab.url.toLowerCase().includes("traitementlivreurexcute")
   ) {
     currentTabId = tabId;
     chrome.scripting.executeScript({

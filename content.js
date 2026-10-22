@@ -2011,28 +2011,375 @@ function extractPrice(rootItem, card) {
   return null;
 }
 
-function processConsultationPageCalls() {
+function extractAddress(rootItem, card) {
+  // 1. Try from API rootItem or json
+  if (rootItem && typeof rootItem === "object") {
+    const candidate =
+      rootItem.Adresse ||
+      rootItem.AdresseClient ||
+      rootItem.Adresse_Client ||
+      rootItem.AdresseDestinataire ||
+      rootItem.Adresse_Destinataire ||
+      rootItem.Address ||
+      rootItem.CustomerAddress ||
+      rootItem.DeliveryAddress ||
+      rootItem.Destination ||
+      (rootItem.Colis &&
+        (rootItem.Colis.Adresse ||
+          rootItem.Colis.Address ||
+          rootItem.Colis.AdresseClient));
+    if (candidate && typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  // 2. Try from card DOM
+  if (card && card.querySelector) {
+    const attrAddr =
+      card.getAttribute("data-adresse") ||
+      card.getAttribute("data-address") ||
+      card.getAttribute("data-destination");
+    if (attrAddr && attrAddr.trim()) return attrAddr.trim();
+
+    const selectors = [
+      ".js-adresse",
+      ".adresse",
+      ".address",
+      ".customer-address",
+      ".destinataire-adresse",
+    ];
+    for (const sel of selectors) {
+      const el = card.querySelector(sel);
+      if (el && el.textContent.trim()) {
+        const text = el.textContent
+          .replace(/^adresse\s*[:：]?\s*/i, "")
+          .trim();
+        if (text) return text;
+      }
+    }
+
+    const elements = card.querySelectorAll("p, span, div, label, td, b, strong");
+    for (const el of elements) {
+      if (el.children.length === 0) {
+        const text = el.textContent.trim();
+        const match = text.match(/(?:adresse|dest(?:ination)?)\s*[:：]\s*(.+)/i);
+        if (match && match[1]) {
+          return match[1].trim();
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+// In-memory & session cache for ZoneColisList data
+let zoneColisCache = null;
+let zoneColisCacheTime = 0;
+let zoneColisFetchPromise = null;
+const ZONE_CACHE_TTL = 3 * 60 * 1000; // 3 minutes
+
+async function getZoneColisData(zoneId = 4) {
+  const now = Date.now();
+  if (zoneColisCache && now - zoneColisCacheTime < ZONE_CACHE_TTL) {
+    return zoneColisCache;
+  }
+
+  // Check sessionStorage
+  try {
+    const stored = sessionStorage.getItem(`gof_zone_colis_${zoneId}`);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (
+        parsed &&
+        parsed.timestamp &&
+        now - parsed.timestamp < ZONE_CACHE_TTL &&
+        parsed.data
+      ) {
+        zoneColisCache = parsed.data;
+        zoneColisCacheTime = parsed.timestamp;
+        return zoneColisCache;
+      }
+    }
+  } catch (e) {
+    // ignore sessionStorage errors
+  }
+
+  if (zoneColisFetchPromise) {
+    return zoneColisFetchPromise;
+  }
+
+  zoneColisFetchPromise = (async () => {
+    try {
+      const targetUrl = `https://tms.marjanemall.ma/Hub/Consultation/ZoneColisList?zoneId=${zoneId}`;
+      const response = await fetch(targetUrl, { credentials: "include" });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} when fetching ZoneColisList`);
+      }
+      const html = await response.text();
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      const colisData = {};
+
+      const addColisItem = (colisNumber, clientName, price, address, phone, livreur) => {
+        if (!colisNumber) return;
+        const clean = (val) => {
+          if (!val) return null;
+          const t = val.trim();
+          return t.length > 0 ? t : null;
+        };
+
+        let formattedPrice = clean(price);
+        if (formattedPrice) {
+          const num = parseFloat(formattedPrice.replace(/[^\d.,]/g, "").replace(",", "."));
+          if (!isNaN(num)) {
+            formattedPrice = `${num.toFixed(2)} DH`;
+          }
+        }
+
+        const cleanCode = colisNumber.toUpperCase().trim();
+        const baseCode = cleanCode.replace(/A$/, "");
+
+        const item = {
+          colis: cleanCode,
+          client: clean(clientName),
+          price: formattedPrice,
+          address: clean(address),
+          phone: clean(phone),
+          livreur: clean(livreur)
+        };
+
+        colisData[cleanCode] = item;
+        colisData[baseCode] = item;
+        colisData[baseCode + "A"] = item;
+      };
+
+      // 1. Try parsing cards (.js-colis-details-row)
+      const cardElements = Array.from(
+        doc.querySelectorAll(".js-colis-details-row, #js-colis-list-infos .card, .card-custom")
+      );
+
+      if (cardElements.length > 0) {
+        cardElements.forEach((card) => {
+          const colisEl =
+            card.querySelector(".text-green") ||
+            card.querySelector(".card-header");
+          const colisText = colisEl ? colisEl.textContent.trim() : card.textContent;
+          const colisMatch = colisText.match(/Colis\s*N°\s*([A-Za-z0-9]+)/i);
+          if (!colisMatch) return;
+
+          const colisNumber = colisMatch[1].trim();
+
+          const divs = Array.from(card.querySelectorAll(".card-body div, div.mb-1, div"));
+          let clientName = null;
+          let phone = null;
+          let address = null;
+          let price = null;
+          let livreur = null;
+
+          divs.forEach((d) => {
+            const txt = d.textContent.trim();
+            if (!clientName && /^Client\s*[:：]/i.test(txt)) {
+              clientName = txt.replace(/^Client\s*[:：]\s*/i, "").trim() || null;
+            } else if (!phone && /^T[ée]l[ée]phone\s*[:：]/i.test(txt)) {
+              phone = txt.replace(/^T[ée]l[ée]phone\s*[:：]\s*/i, "").trim() || null;
+            } else if (!address && /^Adresse\s*[:：]/i.test(txt)) {
+              address = txt.replace(/^Adresse\s*[:：]\s*/i, "").trim() || null;
+            } else if (!price && /^Prix\s*[:：]/i.test(txt)) {
+              price = txt.replace(/^Prix\s*[:：]\s*/i, "").trim() || null;
+            } else if (!livreur && /^Livreur\s*[:：]/i.test(txt)) {
+              livreur = txt.replace(/^Livreur\s*[:：]\s*/i, "").trim() || null;
+            }
+          });
+
+          addColisItem(colisNumber, clientName, price, address, phone, livreur);
+        });
+      }
+
+      // 2. Regex card fallback over raw HTML
+      if (Object.keys(colisData).length === 0) {
+        const cardRegex = /<a[^>]*class="[^"]*js-colis-details-row[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
+        let cardMatch;
+        while ((cardMatch = cardRegex.exec(html)) !== null) {
+          const cardHtml = cardMatch[1];
+          const colisMatch = cardHtml.match(/Colis\s*N°\s*([A-Za-z0-9]+)/i);
+          if (!colisMatch) continue;
+
+          const colisNumber = colisMatch[1].trim();
+          const clientMatch = cardHtml.match(/Client\s*[:：]\s*([^<\r\n]+)/i);
+          const telMatch = cardHtml.match(/T[ée]l[ée]phone\s*[:：]\s*([^<\r\n]+)/i);
+          const addrMatch = cardHtml.match(/Adresse\s*[:：]\s*([^<\r\n]+)/i);
+          const prixMatch = cardHtml.match(/Prix\s*[:：]\s*([\d\s.,]+)/i);
+          const livreurMatch = cardHtml.match(/Livreur\s*[:：]\s*([^<\r\n]+)/i);
+
+          addColisItem(
+            colisNumber,
+            clientMatch ? clientMatch[1] : null,
+            prixMatch ? prixMatch[1] : null,
+            addrMatch ? addrMatch[1] : null,
+            telMatch ? telMatch[1] : null,
+            livreurMatch ? livreurMatch[1] : null
+          );
+        }
+      }
+
+      // 3. Table fallback (in case some views use a table)
+      if (Object.keys(colisData).length === 0) {
+        const tables = doc.querySelectorAll("table");
+        if (tables && tables.length > 0) {
+          const table = Array.from(tables).sort(
+            (a, b) => b.querySelectorAll("tr").length - a.querySelectorAll("tr").length
+          )[0];
+          const rows = Array.from(table.querySelectorAll("tr"));
+
+          let headerRowIdx = -1;
+          const colMap = { colis: -1, client: -1, price: -1, address: -1, phone: -1 };
+
+          for (let r = 0; r < Math.min(rows.length, 6); r++) {
+            const cells = Array.from(rows[r].querySelectorAll("th, td"));
+            const cleanTexts = cells.map((c) =>
+              (c.textContent || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+            );
+
+            const colisIdx = cleanTexts.findIndex((t) =>
+              t.includes("colis") || t.includes("code barre") || t.includes("cab") || t.includes("tracking") || t.includes("envoi")
+            );
+
+            if (colisIdx !== -1) {
+              headerRowIdx = r;
+              colMap.colis = colisIdx;
+              colMap.client = cleanTexts.findIndex((t) => t.includes("client") || t.includes("destinataire") || t.includes("nom"));
+              colMap.price = cleanTexts.findIndex((t) => t.includes("prix") || t.includes("montant") || t.includes("crbt") || t.includes("total"));
+              colMap.address = cleanTexts.findIndex((t) => t.includes("adresse") || t.includes("destination") || t.includes("ville"));
+              colMap.phone = cleanTexts.findIndex((t) => t.includes("tel") || t.includes("phone") || t.includes("contact"));
+              break;
+            }
+          }
+
+          const dataRows = headerRowIdx !== -1 ? rows.slice(headerRowIdx + 1) : rows;
+
+          dataRows.forEach((row) => {
+            const cells = Array.from(row.querySelectorAll("td, th"));
+            if (cells.length === 0) return;
+
+            let colisNumber = colMap.colis !== -1 && cells[colMap.colis] ? cells[colMap.colis].textContent.trim() : "";
+            if (!colisNumber) {
+              for (const c of cells) {
+                const text = c.textContent.trim();
+                const m = text.match(/\b((?:GOF|GMK|GMH|GFS|GTG|GRB)[A-Za-z0-9]+)\b/i) || text.match(/\b(\d{10,24})\b/);
+                if (m) { colisNumber = m[1]; break; }
+              }
+            }
+            if (!colisNumber) return;
+
+            const clientName = colMap.client !== -1 && cells[colMap.client] ? cells[colMap.client].textContent.trim() : null;
+            const price = colMap.price !== -1 && cells[colMap.price] ? cells[colMap.price].textContent.trim() : null;
+            const address = colMap.address !== -1 && cells[colMap.address] ? cells[colMap.address].textContent.trim() : null;
+            const phone = colMap.phone !== -1 && cells[colMap.phone] ? cells[colMap.phone].textContent.trim() : null;
+
+            addColisItem(colisNumber, clientName, price, address, phone, null);
+          });
+        }
+      }
+
+      zoneColisCache = colisData;
+      zoneColisCacheTime = Date.now();
+
+      try {
+        sessionStorage.setItem(
+          `gof_zone_colis_${zoneId}`,
+          JSON.stringify({ timestamp: zoneColisCacheTime, data: colisData })
+        );
+      } catch (e) {}
+
+      console.log(
+        `GoFleet: Successfully indexed ${Object.keys(colisData).length} entries from ZoneColisList`
+      );
+      return colisData;
+    } catch (err) {
+      console.error("GoFleet: Error loading ZoneColisList:", err);
+      return {};
+    } finally {
+      zoneColisFetchPromise = null;
+    }
+  })();
+
+  return zoneColisFetchPromise;
+}
+
+function getActiveZoneId() {
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("zoneId")) return urlParams.get("zoneId");
+    const zoneSelect = document.querySelector(
+      "select[name*='zone' i], select#zoneId, select#ZoneId"
+    );
+    if (zoneSelect && zoneSelect.value) return zoneSelect.value;
+  } catch (e) {}
+  return 4;
+}
+
+async function processConsultationPageCalls() {
   const currentPath = window.location.pathname.toLowerCase();
-  if (!currentPath.includes("/hub/consultation/") &&
-      !currentPath.includes("/caissier/caissier/traitementlivreurexcute")) {
+  const currentHref = window.location.href.toLowerCase();
+  if (
+    !currentPath.includes("/hub/consultation/") &&
+    !currentPath.includes("/caissier/caissier/traitementlivreurexcute") &&
+    !currentHref.includes("traitementlivreurexcute")
+  ) {
     return;
   }
-  
-  const cards = document.querySelectorAll(".js-colis-data:not(.calls-processed)");
+
+  const cardSelector =
+    ".js-colis-data:not(.calls-processed):not(.calls-processing), .js-colis-details-row:not(.calls-processed):not(.calls-processing)";
+  const rawCards = Array.from(document.querySelectorAll(cardSelector));
+  const cards = rawCards.filter(
+    (card) => !card.parentElement?.closest(".js-colis-data, .js-colis-details-row")
+  );
   if (cards.length === 0) return;
 
+  cards.forEach((card) => card.classList.add("calls-processing"));
+
+  const zoneId = getActiveZoneId();
+  let zoneColisMap = {};
+  try {
+    zoneColisMap = await getZoneColisData(zoneId);
+  } catch (err) {
+    console.warn("GoFleet: could not load zone colis data", err);
+  }
+
   cards.forEach(async (card) => {
+    card.classList.remove("calls-processing");
     card.classList.add("calls-processed");
-    const colinum = card.getAttribute("data-colinum") ||
-                    card.querySelector("h6.style-87")?.textContent?.replace("Colis N°", "").trim();
+    let colinum =
+      card.getAttribute("data-colinum") ||
+      card.querySelector("h6.style-87")?.textContent?.replace(/Colis\s*N°/i, "").trim() ||
+      card.querySelector(".text-green")?.textContent?.replace(/Colis\s*N°/i, "").trim();
+
+    if (!colinum) {
+      const cardText = card.textContent || "";
+      const match = cardText.match(/\b((?:GOF|GMK|GMH|GFS|GTG|GRB)[A-Za-z0-9]+)\b/i);
+      if (match) {
+        colinum = match[1].trim();
+      }
+    }
     if (!colinum) return;
-    
+
+    const cleanNum = colinum.trim().toUpperCase();
+    const zoneInfo =
+      zoneColisMap[cleanNum] ||
+      zoneColisMap[cleanNum.replace(/A$/, "")] ||
+      zoneColisMap[cleanNum + "A"] ||
+      null;
+
     const apiColisNum = colinum.endsWith("A") ? colinum : colinum + "A";
 
     try {
-      const response = await fetch(`https://tms.marjanemall.ma/AffectationLivreur/Affectation/GetColisHistorique?cab=${apiColisNum}`, { credentials: "include" });
+      const response = await fetch(
+        `https://tms.marjanemall.ma/AffectationLivreur/Affectation/GetColisHistorique?cab=${apiColisNum}`,
+        { credentials: "include" }
+      );
       const json = await response.json();
-      
+
       let rootItem = null;
       let details = [];
       if (json && json.Success && json.data) {
@@ -2040,12 +2387,14 @@ function processConsultationPageCalls() {
           details = json.data.detail;
           rootItem = json.data;
         } else if (Array.isArray(json.data)) {
-          rootItem = json.data.find(d => 
-            (d.ColisNum || "").trim() === apiColisNum || 
-            (d.TrackingCode || "").trim() === apiColisNum ||
-            (d.ColisNum || "").trim() === colinum || 
-            (d.TrackingCode || "").trim() === colinum
-          ) || json.data[0];
+          rootItem =
+            json.data.find(
+              (d) =>
+                (d.ColisNum || "").trim() === apiColisNum ||
+                (d.TrackingCode || "").trim() === apiColisNum ||
+                (d.ColisNum || "").trim() === colinum ||
+                (d.TrackingCode || "").trim() === colinum
+            ) || json.data[0];
           if (rootItem && Array.isArray(rootItem.detail)) {
             details = rootItem.detail;
           }
@@ -2055,32 +2404,47 @@ function processConsultationPageCalls() {
         }
       }
 
-      const clientName = extractClientName(rootItem || (json && json.data) || json, card);
-      const price = extractPrice(rootItem || (json && json.data) || json, card);
+      const clientName =
+        (zoneInfo && zoneInfo.client) ||
+        extractClientName(rootItem || (json && json.data) || json, card);
+      const price =
+        (zoneInfo && zoneInfo.price) ||
+        extractPrice(rootItem || (json && json.data) || json, card);
+      const address =
+        (zoneInfo && zoneInfo.address) ||
+        extractAddress(rootItem || (json && json.data) || json, card);
+      const phone = (zoneInfo && zoneInfo.phone) || null;
 
       const deliveryAttempts = [];
       let currentAttempt = null;
-      
+
       if (Array.isArray(details)) {
-        details.forEach(item => {
+        details.forEach((item) => {
           const status = item.ColisStatut || "";
-          
+
           if (status.includes("Pris en charge livreur")) {
             currentAttempt = {
               date: parseJsonDateTime(item.DateColis, item.TimeColis),
-              injoignableItems: []
+              injoignableItems: [],
             };
             deliveryAttempts.push(currentAttempt);
           }
-          
+
           if (status.includes("Injoignable") && currentAttempt) {
             const date = parseJsonDateTime(item.DateColis, item.TimeColis);
             currentAttempt.injoignableItems.push({ date, item });
           }
         });
       }
-      
-      if (deliveryAttempts.length === 0 && !clientName && !price) return;
+
+      if (
+        deliveryAttempts.length === 0 &&
+        !clientName &&
+        !price &&
+        !address
+      ) {
+        return;
+      }
 
       const container = document.createElement("div");
       container.className = "gof-colis-enhancement";
@@ -2091,14 +2455,15 @@ function processConsultationPageCalls() {
         border: "1px solid #e2e8f0",
         borderRadius: "10px",
         boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
-        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+        fontFamily:
+          "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
         display: "flex",
         flexDirection: "column",
-        gap: "8px"
+        gap: "8px",
       });
 
-      // 1. Parcel Header (Client Name & Price)
-      if (clientName || price) {
+      // 1. Parcel Header (Client Name, Phone & Price)
+      if (clientName || price || phone) {
         const headerRow = document.createElement("div");
         Object.assign(headerRow.style, {
           display: "flex",
@@ -2106,23 +2471,42 @@ function processConsultationPageCalls() {
           justifyContent: "space-between",
           flexWrap: "wrap",
           gap: "8px",
-          paddingBottom: deliveryAttempts.length > 0 ? "8px" : "0",
-          borderBottom: deliveryAttempts.length > 0 ? "1px solid #e2e8f0" : "none"
+          paddingBottom:
+            address || deliveryAttempts.length > 0 ? "8px" : "0",
+          borderBottom:
+            address || deliveryAttempts.length > 0
+              ? "1px solid #e2e8f0"
+              : "none",
         });
 
-        if (clientName) {
+        if (clientName || phone) {
           const clientDiv = document.createElement("div");
           Object.assign(clientDiv.style, {
             display: "inline-flex",
             alignItems: "center",
+            flexWrap: "wrap",
             gap: "6px",
             fontSize: "12.5px",
-            color: "#334155"
+            color: "#334155",
           });
-          clientDiv.innerHTML = `
+
+          let clientHtml = `
             <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#e0e7ff;color:#4338ca;font-size:12px;">👤</span>
-            <span>Client : <strong style="color: #0f172a; font-weight: 700;">${clientName}</strong></span>
+            <span>Client : <strong style="color: #0f172a; font-weight: 700;">${
+              clientName || "Non spécifié"
+            }</strong></span>
           `;
+
+          if (phone) {
+            clientHtml += `
+              <a href="tel:${phone}" style="display:inline-flex;align-items:center;gap:4px;margin-left:4px;padding:2px 8px;background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;border-radius:6px;font-size:11.5px;font-weight:600;text-decoration:none;">
+                <span>📞</span>
+                <span>${phone}</span>
+              </a>
+            `;
+          }
+
+          clientDiv.innerHTML = clientHtml;
           headerRow.appendChild(clientDiv);
         }
 
@@ -2138,7 +2522,7 @@ function processConsultationPageCalls() {
             border: "1px solid #a7f3d0",
             borderRadius: "14px",
             fontSize: "12.5px",
-            fontWeight: "700"
+            fontWeight: "700",
           });
           priceDiv.innerHTML = `
             <span>💰</span>
@@ -2148,6 +2532,27 @@ function processConsultationPageCalls() {
         }
 
         container.appendChild(headerRow);
+      }
+
+      // 2. Address Row
+      if (address) {
+        const addressRow = document.createElement("div");
+        Object.assign(addressRow.style, {
+          display: "flex",
+          alignItems: "flex-start",
+          gap: "6px",
+          fontSize: "12px",
+          color: "#475569",
+          paddingBottom: deliveryAttempts.length > 0 ? "8px" : "0",
+          borderBottom:
+            deliveryAttempts.length > 0 ? "1px solid #e2e8f0" : "none",
+          lineHeight: "1.4",
+        });
+        addressRow.innerHTML = `
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#fee2e2;color:#dc2626;font-size:11px;flex-shrink:0;margin-top:1px;">📍</span>
+          <span>Adresse : <strong style="color: #1e293b; font-weight: 600;">${address}</strong></span>
+        `;
+        container.appendChild(addressRow);
       }
 
       // 2. Delivery Attempts Timeline
@@ -2302,9 +2707,10 @@ function processConsultationPageCalls() {
         container.appendChild(attemptsWrapper);
       }
 
+      const targetParent = card.querySelector(".card-body") || card;
       const existing = card.querySelector(".gof-colis-enhancement");
       if (existing) existing.remove();
-      card.appendChild(container);
+      targetParent.appendChild(container);
       
     } catch (e) {
       console.error("Error fetching historique for", colinum, e);
@@ -2313,19 +2719,29 @@ function processConsultationPageCalls() {
 }
 
 const currentPath = window.location.pathname.toLowerCase();
+const currentHref = window.location.href.toLowerCase();
 var consultationObserver = null;
 if (
-  (currentPath.includes("/hub/consultation/") ||
-    currentPath.includes("/caissier/caissier/traitementlivreurexcute")) &&
-  document.body &&
-  document.body instanceof Node
+  currentPath.includes("/hub/consultation/") ||
+  currentPath.includes("/caissier/caissier/traitementlivreurexcute") ||
+  currentHref.includes("traitementlivreurexcute")
 ) {
-  consultationObserver = new MutationObserver(() => {
-    processConsultationPageCalls();
-  });
+  function startConsultationObserver() {
+    if (document.body && document.body instanceof Node) {
+      if (consultationObserver) consultationObserver.disconnect();
+      consultationObserver = new MutationObserver(() => {
+        processConsultationPageCalls();
+      });
 
-  consultationObserver.observe(document.body, { childList: true, subtree: true });
-  setTimeout(processConsultationPageCalls, 1000);
+      consultationObserver.observe(document.body, { childList: true, subtree: true });
+      processConsultationPageCalls();
+      setTimeout(processConsultationPageCalls, 1000);
+      setTimeout(processConsultationPageCalls, 2500);
+    } else {
+      setTimeout(startConsultationObserver, 200);
+    }
+  }
+  startConsultationObserver();
 }
 // --- End Consultation page calls check ---
 
