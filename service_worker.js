@@ -21,10 +21,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     tab.url.toLowerCase().includes("traitementlivreurexcute")
   ) {
     currentTabId = tabId;
-    chrome.scripting.executeScript({
-      target: { tabId },
-      files: ["content.js"],
-    });
   }
 });
 
