@@ -342,13 +342,82 @@ async function generateExcelHorsCasa() {
   }
 }
 
+/**
+ * Envoie un message à l'onglet avec injection automatique de secours
+ * si le content script a été déconnecté (rechargement de l'extension / onglet orphelin).
+ */
+async function sendTabMessageWithFallback(tabId, message, tabUrl = "") {
+  if (!tabId) {
+    throw new Error("Aucun onglet actif détecté.");
+  }
+
+  async function trySend() {
+    return await chrome.tabs.sendMessage(tabId, message);
+  }
+
+  try {
+    return await trySend();
+  } catch (err) {
+    const isConnErr =
+      err &&
+      err.message &&
+      (err.message.includes("Receiving end does not exist") ||
+        err.message.includes("Could not establish connection") ||
+        err.message.includes("The message port closed"));
+
+    if (!isConnErr) {
+      throw err;
+    }
+
+    console.warn(
+      `[GoFleet] Extension déconnectée de l'onglet ${tabId}. Tentative de réinjection automatique...`,
+      err
+    );
+
+    // Vérifier si l'URL est injectable (doit être http:// ou https://)
+    const url = (tabUrl || "").toLowerCase();
+    const isInjectable = url.startsWith("http://") || url.startsWith("https://");
+
+    if (!isInjectable || !chrome.scripting || !chrome.scripting.executeScript) {
+      throw new Error(
+        "Impossible de communiquer avec cet onglet.\nVeuillez actualiser la page TMS (F5) pour activer l'extension."
+      );
+    }
+
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ["xlsx.full.min.js", "content.js"],
+      });
+
+      // Attente courte pour initialiser les listeners
+      await new Promise((resolve) => setTimeout(resolve, 350));
+
+      // Deuxième essai
+      return await trySend();
+    } catch (injectErr) {
+      console.error("[GoFleet] Échec de l'injection automatique:", injectErr);
+      throw new Error(
+        "Connexion avec la page TMS interrompue.\n\n" +
+        "Veuillez rafraîchir la page TMS (F5) dans votre navigateur, puis réessayez l'export."
+      );
+    }
+  }
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("printRetour").addEventListener("click", async () => {
     const [tab] = await chrome.tabs.query({
       active: true,
       currentWindow: true,
     });
-    chrome.tabs.sendMessage(tab.id, { action: "printRetourIframes" });
+    if (tab) {
+      try {
+        await sendTabMessageWithFallback(tab.id, { action: "printRetourIframes" }, tab.url);
+      } catch (err) {
+        console.warn("Could not print retour:", err);
+      }
+    }
   });
 
   const searchBtn = document.getElementById("searchTrackingBtn");
@@ -390,30 +459,35 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     console.log("Envoi du tracking au content script:", trackingToFind);
 
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
       const tab = tabs[0];
-      chrome.tabs.sendMessage(
-        tab.id,
-        { action: "searchTracking", trackingToFind },
-        (response) => {
-          console.log("Réponse du content script:", response);
+      if (!tab) return;
+      try {
+        const response = await sendTabMessageWithFallback(
+          tab.id,
+          { action: "searchTracking", trackingToFind },
+          tab.url
+        );
+        console.log("Réponse du content script:", response);
 
-          if (response && response.found) {
-            alert(`✅ Tracking trouvé: ${response.trackingCode}`);
-          } else {
-            alert("❌ Tracking introuvable dans cette page.");
-          }
-
-          // Reset UI
-          startBtn.innerHTML = "Valider";
-          startBtn.disabled = false;
-          input.value = "";
-
-          input.style.display = "none";
-          startBtn.style.display = "none";
-          isVisible = false;
+        if (response && response.found) {
+          alert(`✅ Tracking trouvé: ${response.trackingCode}`);
+        } else {
+          alert("❌ Tracking introuvable dans cette page.");
         }
-      );
+      } catch (err) {
+        console.warn("searchTracking error:", err);
+        alert(err.message || "Erreur de communication avec la page.");
+      } finally {
+        // Reset UI
+        startBtn.innerHTML = "Valider";
+        startBtn.disabled = false;
+        input.value = "";
+
+        input.style.display = "none";
+        startBtn.style.display = "none";
+        isVisible = false;
+      }
     });
   });
 
@@ -1043,4 +1117,331 @@ document.addEventListener("DOMContentLoaded", async () => {
         alert(`Erreur: ${error.message}`);
       }
     });
+
+  // --- Module Export Colis Non Livrés (Par Livreur) ---
+  function sanitizeExcelSheetName(name, existingSet = new Set()) {
+    if (!name || typeof name !== "string") name = "Livreur";
+    // Replace forbidden characters: \ / ? * [ ] :
+    let clean = name.replace(/[\\/?*[\]:]/g, "_").trim();
+    if (clean.length > 28) {
+      clean = clean.substring(0, 28).trim();
+    }
+    if (!clean) clean = "Livreur";
+
+    let candidate = clean;
+    let idx = 1;
+    while (existingSet.has(candidate.toLowerCase())) {
+      candidate = `${clean.substring(0, 25)}_${idx}`;
+      idx++;
+    }
+    existingSet.add(candidate.toLowerCase());
+    return candidate;
+  }
+
+  function updateNonDeliveredBadge() {
+    const label = document.getElementById("nonDeliveredCountLabel");
+    if (!label) return;
+
+    chrome.storage.local.get({ gofleet_non_delivered_by_rider: {} }, (res) => {
+      const data = res.gofleet_non_delivered_by_rider || {};
+      const riders = Object.keys(data);
+      let totalParcels = 0;
+      riders.forEach((r) => {
+        totalParcels += (data[r]?.parcels || []).length;
+      });
+
+      label.innerHTML = `
+        <i class="fa-solid fa-layer-group" style="color: #0d9488;"></i>
+        <span><strong>${riders.length}</strong> livreur(s) • <strong>${totalParcels}</strong> colis non livré(s)</span>
+      `;
+    });
+  }
+
+  // Update badge on load
+  updateNonDeliveredBadge();
+
+  // Reset button
+  const clearNonDeliveredBtn = document.getElementById("clearNonDeliveredBtn");
+  if (clearNonDeliveredBtn) {
+    clearNonDeliveredBtn.addEventListener("click", async () => {
+      if (confirm("Voulez-vous réinitialiser tous les colis non livrés mémorisés pour tous les livreurs ?")) {
+        await chrome.storage.local.remove("gofleet_non_delivered_by_rider");
+        updateNonDeliveredBadge();
+        alert("Mémoire des colis non livrés réinitialisée.");
+      }
+    });
+  }
+
+  // Main Export Button
+  const exportNonDeliveredBtn = document.getElementById("exportNonDeliveredRiders");
+  if (exportNonDeliveredBtn) {
+    exportNonDeliveredBtn.addEventListener("click", async () => {
+      try {
+        exportNonDeliveredBtn.disabled = true;
+        const originalHtml = exportNonDeliveredBtn.innerHTML;
+        exportNonDeliveredBtn.innerHTML = `
+          <div class="button-content" style="flex-direction: row; align-items: center; justify-content: center; width: 100%; gap: 10px;">
+            <span class="spinner"></span>
+            <span style="font-weight: 600;">Génération de l'Excel...</span>
+          </div>
+        `;
+
+        // 1. Try to collect live data depending on active tab
+        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const activeUrl = (activeTab?.url || "").toLowerCase();
+
+        if (activeUrl.includes("/caissier/caissier") && !activeUrl.includes("traitementlivreurexcute")) {
+          const isSingleEncaissement = activeUrl.includes("tourneeencaisement");
+          exportNonDeliveredBtn.innerHTML = `
+            <div class="button-content" style="flex-direction: row; align-items: center; justify-content: center; width: 100%; gap: 10px;">
+              <span class="spinner"></span>
+              <span style="font-weight: 600;">${isSingleEncaissement ? "Extraction de la tournée..." : "Extraction de toutes les tournées..."}</span>
+            </div>
+          `;
+          try {
+            const response = await sendTabMessageWithFallback(
+              activeTab.id,
+              { action: "collectAllCaissierRidersParcels" },
+              activeTab?.url
+            );
+            if (response?.status === "ok" && response.data) {
+              console.log("Données de tous les livreurs collectées depuis Caissier:", response.data);
+            } else if (response?.status === "error") {
+              console.warn("Avertissement renvoyé par Caissier:", response.message);
+            }
+          } catch (e) {
+            console.warn("Could not query Caissier page for riders:", e);
+            alert(e.message || "Erreur lors de l'extraction des données de la page Caissier.");
+            exportNonDeliveredBtn.disabled = false;
+            exportNonDeliveredBtn.innerHTML = originalHtml;
+            return;
+          }
+        } else if (activeUrl.includes("traitementlivreurexcute")) {
+          exportNonDeliveredBtn.innerHTML = `
+            <div class="button-content" style="flex-direction: row; align-items: center; justify-content: center; width: 100%; gap: 10px;">
+              <span class="spinner"></span>
+              <span style="font-weight: 600;">Extraction des colis de la tournée...</span>
+            </div>
+          `;
+          try {
+            const response = await sendTabMessageWithFallback(
+              activeTab.id,
+              { action: "collectNonDeliveredParcels" },
+              activeTab?.url
+            );
+            if (response?.status === "ok" && response.data) {
+              console.log("Données collectées en direct depuis l'onglet actif:", response.data);
+            } else if (response?.status === "error") {
+              console.warn("Avertissement renvoyé par TraitementLivreur:", response.message);
+            }
+          } catch (e) {
+            console.warn("Could not query active tab for live non-delivered parcels:", e);
+            alert(e.message || "Erreur lors de l'extraction des colis de la tournée.");
+            exportNonDeliveredBtn.disabled = false;
+            exportNonDeliveredBtn.innerHTML = originalHtml;
+            return;
+          }
+        }
+
+        // Rafraîchir le badge du compteur
+        updateNonDeliveredBadge();
+
+        // 2. Read all accumulated non-delivered parcels from storage
+        const { gofleet_non_delivered_by_rider = {} } = await chrome.storage.local.get(
+          "gofleet_non_delivered_by_rider"
+        );
+
+        const riderNames = Object.keys(gofleet_non_delivered_by_rider);
+        if (riderNames.length === 0) {
+          alert(
+            "Aucun colis non livré (annulé ou refusé) n'a été trouvé.\n\n" +
+            "Veuillez ouvrir la page Caissier (https://tms.marjanemall.ma/Caissier/Caissier) ou une page de tournée (TraitementLivreurExcute) pour extraire les colis."
+          );
+          exportNonDeliveredBtn.disabled = false;
+          exportNonDeliveredBtn.innerHTML = originalHtml;
+          return;
+        }
+
+        let totalParcelsCount = 0;
+        riderNames.forEach((r) => {
+          totalParcelsCount += (gofleet_non_delivered_by_rider[r]?.parcels || []).length;
+        });
+
+        if (totalParcelsCount === 0) {
+          alert("Tous les colis trouvés sont marqués comme livrés. Aucun colis en échec/annulé/refusé à exporter.");
+          exportNonDeliveredBtn.disabled = false;
+          exportNonDeliveredBtn.innerHTML = originalHtml;
+          return;
+        }
+
+        // 3. Build Excel Workbook with a sheet for EACH rider
+        const wb = XLSX.utils.book_new();
+        const existingSheets = new Set();
+
+        const headerStyle = {
+          font: { bold: true, color: { rgb: "FFFFFF" } },
+          fill: { fgColor: { rgb: "0D9488" } },
+          alignment: { horizontal: "center", vertical: "center" },
+        };
+
+        const summaryHeaderStyle = {
+          font: { bold: true, color: { rgb: "FFFFFF" } },
+          fill: { fgColor: { rgb: "1E293B" } },
+          alignment: { horizontal: "center", vertical: "center" },
+        };
+
+        // Summary sheet if multiple riders
+        if (riderNames.length > 1) {
+          const summaryRows = [];
+          riderNames.forEach((rider) => {
+            const rData = gofleet_non_delivered_by_rider[rider];
+            const pCount = (rData?.parcels || []).length;
+            summaryRows.push({
+              "Livreur": rider,
+              "N° Tournée": rData?.tourneeId || "N/A",
+              "Colis Non Livrés": pCount,
+              "Date": rData?.date || "",
+              "Statut Tournée": pCount > 0 ? `${pCount} non livrés` : "Complet"
+            });
+          });
+
+          summaryRows.push({
+            "Livreur": "TOTAL",
+            "N° Tournée": "-",
+            "Colis Non Livrés": totalParcelsCount,
+            "Date": formatDate(),
+            "Statut Tournée": "-"
+          });
+
+          const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
+          wsSummary["!cols"] = [
+            { wch: 28 }, // Livreur
+            { wch: 18 }, // N° Tournée
+            { wch: 20 }, // Colis Non Livrés
+            { wch: 16 }, // Date
+            { wch: 20 }  // Statut
+          ];
+
+          const summaryHeaders = ["Livreur", "N° Tournée", "Colis Non Livrés", "Date", "Statut Tournée"];
+          XLSX.utils.sheet_add_aoa(wsSummary, [summaryHeaders], { origin: "A1" });
+
+          for (let col = 0; col < summaryHeaders.length; col++) {
+            const cellRef = XLSX.utils.encode_cell({ r: 0, c: col });
+            if (!wsSummary[cellRef]) wsSummary[cellRef] = {};
+            if (!wsSummary[cellRef].s) wsSummary[cellRef].s = {};
+            Object.assign(wsSummary[cellRef].s, summaryHeaderStyle);
+          }
+
+          XLSX.utils.book_append_sheet(wb, wsSummary, "RÉCAPITULATIF");
+          existingSheets.add("récapitulatif");
+        }
+
+        // Each rider gets their own sheet
+        riderNames.forEach((riderName) => {
+          const rData = gofleet_non_delivered_by_rider[riderName];
+          const parcels = rData?.parcels || [];
+
+          const sheetData = parcels.length > 0
+            ? parcels.map((item, idx) => ({
+                "N°": idx + 1,
+                "Colis": item.colis || "",
+                "Statut": item.statut || "Non livré",
+                "Raison / Motif": item.raisonAnnulation || "-",
+                "Destinataire": item.client || "-",
+                "Téléphone": item.telephone || "-",
+                "Adresse": item.adresse || "-",
+                "Montant": item.prix || "-",
+                "N° Tournée": item.tourneeId || rData?.tourneeId || "-",
+                "Date": item.date || rData?.date || "",
+                "Livreur": riderName
+              }))
+            : [
+                {
+                  "N°": 1,
+                  "Colis": "-",
+                  "Statut": "Tous les colis livrés (0 échec)",
+                  "Raison / Motif": "-",
+                  "Destinataire": "-",
+                  "Téléphone": "-",
+                  "Adresse": "-",
+                  "Montant": "-",
+                  "N° Tournée": rData?.tourneeId || "-",
+                  "Date": rData?.date || "",
+                  "Livreur": riderName
+                }
+              ];
+
+          const ws = XLSX.utils.json_to_sheet(sheetData);
+
+          ws["!cols"] = [
+            { wch: 6 },  // N°
+            { wch: 22 }, // Colis
+            { wch: 20 }, // Statut
+            { wch: 32 }, // Raison / Motif
+            { wch: 26 }, // Destinataire
+            { wch: 18 }, // Téléphone
+            { wch: 36 }, // Adresse
+            { wch: 16 }, // Montant
+            { wch: 15 }, // N° Tournée
+            { wch: 14 }, // Date
+            { wch: 24 }  // Livreur
+          ];
+
+          const sheetHeaders = [
+            "N°", "Colis", "Statut", "Raison / Motif", "Destinataire",
+            "Téléphone", "Adresse", "Montant", "N° Tournée", "Date", "Livreur"
+          ];
+          XLSX.utils.sheet_add_aoa(ws, [sheetHeaders], { origin: "A1" });
+
+          for (let col = 0; col < sheetHeaders.length; col++) {
+            const cellRef = XLSX.utils.encode_cell({ r: 0, c: col });
+            if (!ws[cellRef]) ws[cellRef] = {};
+            if (!ws[cellRef].s) ws[cellRef].s = {};
+            Object.assign(ws[cellRef].s, headerStyle);
+          }
+
+          const safeSheetName = sanitizeExcelSheetName(riderName, existingSheets);
+          XLSX.utils.book_append_sheet(wb, ws, safeSheetName);
+        });
+
+        // 4. Download file
+        const wbArrayBuffer = XLSX.write(wb, {
+          bookType: "xlsx",
+          type: "array",
+        });
+        const blob = new Blob([wbArrayBuffer], {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        });
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const filename = riderNames.length === 1
+          ? `COLIS_NON_LIVRES_${riderNames[0].replace(/\s+/g, "_")}_${formatDateForFilename()}.xlsx`
+          : `COLIS_NON_LIVRES_${riderNames.length}_LIVREURS_${formatDateForFilename()}.xlsx`;
+
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        updateNonDeliveredBadge();
+
+        alert(
+          `✅ Export Excel réussi !\n\n` +
+          `• Total Colis Non Livrés : ${totalParcelsCount}\n` +
+          `• Nombre de livreurs : ${riderNames.length}\n` +
+          `• Fichier : ${filename}\n\n` +
+          `Chaque livreur dispose de son propre onglet contenant ses colis (annulés / refusés) et leurs statuts.`
+        );
+      } catch (err) {
+        console.error("Export non livrés échoué:", err);
+        alert(`Erreur d'exportation : ${err.message}`);
+      } finally {
+        exportNonDeliveredBtn.disabled = false;
+        exportNonDeliveredBtn.innerHTML = originalHtml;
+      }
+    });
+  }
 });

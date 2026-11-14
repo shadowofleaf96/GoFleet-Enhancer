@@ -48,4 +48,41 @@ chrome.runtime.onMessage.addListener((request, sender) => {
       }
     });
   }
+
+  if (request.action === "storeNonDeliveredParcels" && request.data) {
+    chrome.storage.local.get({ gofleet_non_delivered_by_rider: {} }, (result) => {
+      const currentMap = result.gofleet_non_delivered_by_rider || {};
+      const { livreur, tourneeId, date, parcels } = request.data;
+      if (!livreur || !Array.isArray(parcels)) return;
+
+      const existingData = currentMap[livreur] || {
+        livreur,
+        tourneeId,
+        date,
+        parcels: []
+      };
+
+      const parcelsMap = new Map();
+      (existingData.parcels || []).forEach((p) => {
+        if (p && p.colis) parcelsMap.set(p.colis.toUpperCase(), p);
+      });
+
+      parcels.forEach((p) => {
+        if (p && p.colis) {
+          const key = p.colis.toUpperCase();
+          parcelsMap.set(key, { ...parcelsMap.get(key), ...p });
+        }
+      });
+
+      currentMap[livreur] = {
+        livreur,
+        tourneeId: tourneeId || existingData.tourneeId || "N/A",
+        date: date || existingData.date || "",
+        lastUpdated: new Date().toISOString(),
+        parcels: Array.from(parcelsMap.values())
+      };
+
+      chrome.storage.local.set({ gofleet_non_delivered_by_rider: currentMap });
+    });
+  }
 });

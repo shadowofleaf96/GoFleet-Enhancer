@@ -1510,6 +1510,10 @@ var caissierProcessedDate = null;
 function handleCaissierPage() {
   if (!isCaissierPage()) return;
 
+  if (typeof mountCaissierExportButton === "function") {
+    mountCaissierExportButton();
+  }
+
   const dateFilter = getCaissierDateFilter();
   const rows = document.querySelectorAll(
     ".js-tournee-info-container:not(#gofleet-restored-card)"
@@ -1708,6 +1712,746 @@ function extractRefusedColis() {
 
 setTimeout(extractRefusedColis, 2000);
 
+// =========================================================================
+// --- Start TraitementLivreurExcute Non-Delivered Parcels Export Module ---
+// Extracts all non-delivered parcels (cancelled, refused, failure, etc.)
+// on TraitementLivreurExcute, stores them grouped by rider, and exports
+// an Excel file with one sheet per rider.
+// =========================================================================
+
+function isTraitementLivreurPage() {
+  const path = (window.location.pathname || "").toLowerCase();
+  const href = (window.location.href || "").toLowerCase();
+  return (
+    path.includes("traitementlivreurexcute") ||
+    href.includes("traitementlivreurexcute") ||
+    path.includes("traitementlivreuxexcute") ||
+    href.includes("traitementlivreuxexcute")
+  );
+}
+
+function extractPageLivreurName(root = document) {
+  const el = root.querySelector(".caissier-style label.ml-3, .caissier-style label");
+  if (el && el.textContent.trim()) {
+    const clean = el.textContent.replace(/^livreur\s*[:：]?\s*/i, "").trim();
+    if (clean) return clean;
+  }
+  const caissierStyle = root.querySelector(".caissier-style");
+  if (caissierStyle) {
+    const text = caissierStyle.textContent.trim();
+    const m = text.match(/livreur\s*[:：]?\s*([A-Za-zÀ-ÿ\s'-]+?)(?:\s*[-–•|]|\s*tourn|\s*$)/i);
+    if (m && m[1].trim()) return m[1].trim();
+  }
+  const headers = root.querySelectorAll(".card-title, h1, h2, h3, h4, h5, h6, .subheader, .breadcrumb");
+  for (const h of headers) {
+    const text = h.textContent.trim();
+    const m = text.match(/livreur\s*[:：]?\s*([A-Za-zÀ-ÿ\s'-]+?)(?:\s*[-–•|]|\s*$)/i);
+    if (m && m[1].trim()) return m[1].trim();
+  }
+  const urlParams = new URLSearchParams(window.location.search);
+  const tourneeId = urlParams.get("TourneeId") || urlParams.get("tourneeId") || urlParams.get("TournneId") || urlParams.get("tournneId");
+  if (tourneeId) return `Livreur_Tournee_${tourneeId}`;
+  return "Livreur_Inconnu";
+}
+
+function extractPageTourneeId(root = document) {
+  const urlParams = new URLSearchParams(window.location.search);
+  let id = urlParams.get("TourneeId") || urlParams.get("tourneeId") || urlParams.get("TournneId") || urlParams.get("tournneId");
+  if (id) return id;
+  const m = window.location.href.match(/(?:TournneId|TourneeId|tourneeId|tournneId)=([0-9]+)/i);
+  if (m) return m[1];
+  return "N/A";
+}
+
+function extractNonDeliveredParcelsFromDOM(root = document, fallbackLivreurName = null, tourneeId = null) {
+  const livreurName = fallbackLivreurName || extractPageLivreurName(root);
+  const resolvedTourneeId = tourneeId || extractPageTourneeId(root);
+  const today = new Date();
+  const formattedDate = `${String(today.getDate()).padStart(2, "0")}/${String(
+    today.getMonth() + 1
+  ).padStart(2, "0")}/${today.getFullYear()}`;
+
+  const cardSelector =
+    ".js-colis-data, .js-colis-details-row, [data-colinum], [data-numcolis], .caissier-card";
+  let rawCards = Array.from(root.querySelectorAll(cardSelector));
+  let cards = rawCards.filter(
+    (card) => !card.parentElement?.closest(".js-colis-data, .js-colis-details-row")
+  );
+
+  if (cards.length === 0) {
+    cards = Array.from(root.querySelectorAll("table tbody tr, table tr")).filter((row) => {
+      return (
+        !row.querySelector("th") &&
+        (row.getAttribute("data-colinum") || row.querySelector("td"))
+      );
+    });
+  }
+
+  const nonDeliveredList = [];
+  const seenCodes = new Set();
+
+  cards.forEach((card) => {
+    // 1. Status extraction
+    let status = "";
+    const statusEl = card.querySelector(
+      ".js-statut-info, .statut-colis-88, .badge, [class*='statut'], [class*='status']"
+    );
+    if (statusEl) {
+      status = statusEl.textContent.trim();
+    } else {
+      status = card.getAttribute("data-statut") || card.getAttribute("data-status") || "";
+    }
+    status = status.replace(/\s+/g, " ").trim();
+    const lowerStatus = status.toLowerCase();
+
+    // 2. Reason extraction
+    const reasonEl = card.querySelector(
+      ".redo, .js-motif, .motif, .raison, .js-raison, [data-motif]"
+    );
+    const reason = reasonEl ? reasonEl.textContent.trim() : "";
+
+    // Determine if parcel is delivered
+    const isDelivered = (
+      (lowerStatus.includes("livr") || lowerStatus.includes("delivered")) &&
+      !lowerStatus.includes("non") &&
+      !lowerStatus.includes("échec") &&
+      !lowerStatus.includes("echec") &&
+      !lowerStatus.includes("annul") &&
+      !lowerStatus.includes("refus") &&
+      !lowerStatus.includes("retour")
+    );
+
+    // Strictly skip delivered parcels
+    if (isDelivered) {
+      return;
+    }
+
+    // If status is empty, infer from reason or text
+    if (!status && reason) {
+      status = "Non livré";
+    }
+
+    if (!status) {
+      const cardText = card.textContent || "";
+      if (/refus/i.test(cardText)) status = "Refusé";
+      else if (/annul/i.test(cardText)) status = "Annulé";
+      else if (/non\s*livr/i.test(cardText)) status = "Non livré";
+      else if (/échec|echec/i.test(cardText)) status = "Echec";
+      else {
+        return;
+      }
+    }
+
+    // 3. Colis / Tracking code
+    let colisNumber =
+      card.getAttribute("data-colinum") ||
+      card.getAttribute("data-numcolis") ||
+      card.getAttribute("data-tracking") ||
+      card.getAttribute("data-trackingcode") ||
+      card.getAttribute("data-barcode") ||
+      card.getAttribute("data-cab") ||
+      "";
+
+    if (!colisNumber) {
+      const headerEl = card.querySelector("h6.style-87, .card-title, h6, .text-green");
+      if (headerEl) {
+        colisNumber = headerEl.textContent.replace(/Colis\s*N°/i, "").trim();
+      }
+    }
+
+    if (!colisNumber) {
+      const text = card.textContent || "";
+      const match =
+        text.match(/\b((?:GOF|GMK|GMH|GFS|GTG|GRB)[A-Za-z0-9]+)\b/i) ||
+        text.match(/\b\d{10,24}\b/);
+      if (match) colisNumber = match[0].trim();
+    }
+
+    if (!colisNumber) return;
+    colisNumber = colisNumber.trim().toUpperCase();
+
+    if (seenCodes.has(colisNumber)) return;
+    seenCodes.add(colisNumber);
+
+    // 4. Client name
+    let clientName = "";
+    if (typeof extractClientName === "function") {
+      clientName = extractClientName(null, card) || "";
+    } else {
+      const clientEl = card.querySelector(".js-client-name, .client, .destinataire, .customer");
+      if (clientEl) clientName = clientEl.textContent.replace(/^client\s*[:：]?\s*/i, "").trim();
+    }
+
+    // 5. Price
+    let price = "";
+    if (typeof extractPrice === "function") {
+      price = extractPrice(null, card) || "";
+    } else {
+      const priceEl = card.querySelector(".js-prix, .prix, .montant, .crbt");
+      if (priceEl) price = priceEl.textContent.trim();
+    }
+
+    // 6. Address
+    let address = "";
+    if (typeof extractAddress === "function") {
+      address = extractAddress(null, card) || "";
+    } else {
+      const addrEl = card.querySelector(".js-adresse, .adresse, .address");
+      if (addrEl) address = addrEl.textContent.replace(/^adresse\s*[:：]?\s*/i, "").trim();
+    }
+
+    // 7. Phone
+    let phone = "";
+    const phoneEl = card.querySelector("a[href^='tel:'], .js-phone, .phone");
+    if (phoneEl) {
+      phone = phoneEl.textContent.trim();
+    } else {
+      const phoneMatch =
+        card.textContent.match(/\b0[5-7]\d{8}\b/) || card.textContent.match(/\+212\d{9}\b/);
+      if (phoneMatch) phone = phoneMatch[0];
+    }
+
+    nonDeliveredList.push({
+      date: formattedDate,
+      colis: colisNumber,
+      statut: status,
+      raisonAnnulation: reason,
+      client: clientName,
+      telephone: phone,
+      adresse: address,
+      prix: price,
+      tourneeId: resolvedTourneeId,
+      livreur: livreurName,
+    });
+  });
+
+  return {
+    livreur: livreurName,
+    tourneeId: resolvedTourneeId,
+    date: formattedDate,
+    parcels: nonDeliveredList,
+  };
+}
+
+function saveNonDeliveredParcelsToStorage(data) {
+  return new Promise((resolve) => {
+    if (!data || !data.livreur) return resolve(false);
+
+    chrome.storage.local.get({ gofleet_non_delivered_by_rider: {} }, (res) => {
+      const currentMap = res.gofleet_non_delivered_by_rider || {};
+      const existing = currentMap[data.livreur] || {
+        livreur: data.livreur,
+        tourneeId: data.tourneeId,
+        date: data.date,
+        parcels: [],
+      };
+
+      const parcelsMap = new Map();
+      (existing.parcels || []).forEach((p) => {
+        if (p && p.colis) parcelsMap.set(p.colis.toUpperCase(), p);
+      });
+
+      (data.parcels || []).forEach((p) => {
+        if (p && p.colis) {
+          const key = p.colis.toUpperCase();
+          parcelsMap.set(key, { ...parcelsMap.get(key), ...p });
+        }
+      });
+
+      currentMap[data.livreur] = {
+        livreur: data.livreur,
+        tourneeId: data.tourneeId || existing.tourneeId,
+        date: data.date || existing.date,
+        lastUpdated: new Date().toISOString(),
+        parcels: Array.from(parcelsMap.values()),
+      };
+
+      chrome.storage.local.set({ gofleet_non_delivered_by_rider: currentMap }, () => {
+        resolve(true);
+      });
+    });
+  });
+}
+
+// Find all riders and their Tournee IDs from the Caissier page
+function findRidersOnCaissierPage(root = document) {
+  const riders = [];
+  const seenTournees = new Set();
+
+  function getTourneeId(str) {
+    if (!str || typeof str !== "string") return null;
+    const m = str.match(/(?:TournneId|TourneeId|tourneeId|tournneId)=(\d+)/i);
+    if (m && m[1]) return m[1];
+    const mAlt = str.match(/TourneeEncaisement[^\d]*?(\d{4,})/i);
+    if (mAlt && mAlt[1]) return mAlt[1];
+    return null;
+  }
+
+  // 1. Look for cards with .js-tournee-info-container
+  const cards = Array.from(root.querySelectorAll(".js-tournee-info-container:not(#gofleet-restored-card)"));
+  for (const card of cards) {
+    let name =
+      card.querySelector(".text-dark-75")?.textContent?.trim() ||
+      card.getAttribute("data-livreurname")?.trim() ||
+      card.querySelector("h4, h5, h6, strong, b")?.textContent?.trim() ||
+      "Livreur";
+    name = name.replace(/\s+/g, " ").trim();
+
+    let tourneeId = null;
+    const links = Array.from(card.querySelectorAll("a, button, [onclick], [data-href], [data-url], [data-tourneeid], [data-tournneid]"));
+    for (const el of links) {
+      tourneeId =
+        el.getAttribute("data-tourneeid") ||
+        el.getAttribute("data-tournneid") ||
+        getTourneeId(el.getAttribute("href")) ||
+        getTourneeId(el.href) ||
+        getTourneeId(el.getAttribute("onclick")) ||
+        getTourneeId(el.getAttribute("data-href")) ||
+        getTourneeId(el.getAttribute("data-url"));
+      if (tourneeId) break;
+    }
+
+    if (!tourneeId) {
+      tourneeId = getTourneeId(card.outerHTML);
+    }
+
+    if (tourneeId && !seenTournees.has(tourneeId)) {
+      seenTournees.add(tourneeId);
+      riders.push({ name, tourneeId });
+    }
+  }
+
+  // 2. If no cards found, check all links & buttons across the entire page
+  if (riders.length === 0) {
+    const allLinks = Array.from(root.querySelectorAll("a, button, [onclick]"));
+    for (const el of allLinks) {
+      const tourneeId =
+        getTourneeId(el.getAttribute("href")) ||
+        getTourneeId(el.href) ||
+        getTourneeId(el.getAttribute("onclick"));
+
+      if (tourneeId && !seenTournees.has(tourneeId)) {
+        seenTournees.add(tourneeId);
+        const container = el.closest(".card, tr, .row, li, div.col, div[class*='col-']") || el;
+        const name =
+          container.querySelector(".text-dark-75, [data-livreurname], h4, h5, h6, strong")?.textContent?.trim() ||
+          el.textContent?.trim() ||
+          `Livreur_${tourneeId}`;
+        riders.push({
+          name: name.replace(/\s+/g, " ").trim(),
+          tourneeId
+        });
+      }
+    }
+  }
+
+  // 3. Fallback: check if the current page itself has a tournee in its URL (e.g. TourneeEncaisement?TournneId=66668)
+  if (riders.length === 0 && typeof window !== "undefined" && window.location) {
+    const pageTourneeId = getTourneeId(window.location.href);
+    if (pageTourneeId && !seenTournees.has(pageTourneeId)) {
+      seenTournees.add(pageTourneeId);
+      let pageName = extractPageLivreurName(root);
+      if (!pageName || pageName === "Livreur_Inconnu") {
+        const titleEl = root.querySelector("h1, h2, h3, h4, .page-title, .subheader-title, [class*='livreur']");
+        if (titleEl) {
+          const txt = titleEl.textContent.replace(/tourn[ée]+|encaissement|détail|traitement/gi, "").trim();
+          if (txt) pageName = txt;
+        }
+      }
+      riders.push({
+        name: pageName || `Livreur_${pageTourneeId}`,
+        tourneeId: pageTourneeId,
+      });
+    }
+  }
+
+  return riders;
+}
+
+// Fetch TraitementLivreurExcute page for every rider on the Caissier page
+async function fetchAllRidersNonDeliveredParcels(onProgress) {
+  const riders = findRidersOnCaissierPage();
+  if (riders.length === 0) {
+    throw new Error("Aucune tournée de livreur trouvée sur cette page Caissier.");
+  }
+
+  console.log(`[GoFleet] Extraction de ${riders.length} tournée(s)...`, riders);
+
+  const results = {};
+  for (let i = 0; i < riders.length; i++) {
+    const r = riders[i];
+    if (typeof onProgress === "function") {
+      onProgress(i + 1, riders.length, r.name);
+    }
+
+    try {
+      const url = `https://tms.marjanemall.ma/Caissier/Caissier/TraitementLivreurExcute?TourneeId=${r.tourneeId}`;
+      const resp = await fetch(url, { credentials: "include" });
+      if (!resp.ok) {
+        console.warn(`[GoFleet] HTTP ${resp.status} pour tournée ${r.tourneeId}`);
+        continue;
+      }
+      const html = await resp.text();
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      const extracted = extractNonDeliveredParcelsFromDOM(doc, r.name, r.tourneeId);
+
+      const resolvedName = (extracted.livreur && extracted.livreur !== "Livreur_Inconnu")
+        ? extracted.livreur
+        : r.name;
+
+      results[resolvedName] = {
+        ...extracted,
+        livreur: resolvedName,
+        tourneeId: r.tourneeId
+      };
+    } catch (err) {
+      console.error(`[GoFleet] Erreur extraction livreur ${r.name} (${r.tourneeId}):`, err);
+    }
+  }
+
+  // Save all to storage
+  const { gofleet_non_delivered_by_rider = {} } = await new Promise((res) => {
+    chrome.storage.local.get({ gofleet_non_delivered_by_rider: {} }, res);
+  });
+
+  const merged = { ...gofleet_non_delivered_by_rider, ...results };
+  await new Promise((res) => {
+    chrome.storage.local.set({ gofleet_non_delivered_by_rider: merged }, res);
+  });
+
+  return results;
+}
+
+// Build and download the Excel workbook with one sheet per rider
+function buildAndDownloadNonDeliveredWorkbook(map) {
+  if (typeof XLSX === "undefined") {
+    alert("Librairie Excel (XLSX) indisponible. Veuillez rafraîchir la page ou utiliser le bouton dans la fenêtre de l'extension.");
+    return false;
+  }
+
+  const riderNames = Object.keys(map);
+  if (riderNames.length === 0) {
+    alert("Aucun colis non livré (annulé ou refusé) trouvé.");
+    return false;
+  }
+
+  const wb = XLSX.utils.book_new();
+  const existingSheets = new Set();
+
+  const headerStyle = {
+    font: { bold: true, color: { rgb: "FFFFFF" } },
+    fill: { fgColor: { rgb: "0D9488" } },
+    alignment: { horizontal: "center", vertical: "center" },
+  };
+
+  let totalParcels = 0;
+  riderNames.forEach((rider) => {
+    totalParcels += (map[rider]?.parcels || []).length;
+  });
+
+  // Summary sheet if multiple riders
+  if (riderNames.length > 1) {
+    const summaryRows = [];
+    riderNames.forEach((rider) => {
+      const rData = map[rider];
+      const count = (rData?.parcels || []).length;
+      summaryRows.push({
+        "Livreur": rider,
+        "N° Tournée": rData?.tourneeId || "N/A",
+        "Colis Non Livrés": count,
+        "Date": rData?.date || "",
+        "Statut": count > 0 ? `${count} non livrés` : "100% Livré"
+      });
+    });
+    summaryRows.push({
+      "Livreur": "TOTAL",
+      "N° Tournée": "-",
+      "Colis Non Livrés": totalParcels,
+      "Date": "",
+      "Statut": "-"
+    });
+
+    const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
+    wsSummary["!cols"] = [{ wch: 28 }, { wch: 18 }, { wch: 20 }, { wch: 16 }, { wch: 18 }];
+    const summaryHeaders = ["Livreur", "N° Tournée", "Colis Non Livrés", "Date", "Statut"];
+    XLSX.utils.sheet_add_aoa(wsSummary, [summaryHeaders], { origin: "A1" });
+    for (let col = 0; col < summaryHeaders.length; col++) {
+      const cellRef = XLSX.utils.encode_cell({ r: 0, c: col });
+      if (!wsSummary[cellRef]) wsSummary[cellRef] = {};
+      if (!wsSummary[cellRef].s) wsSummary[cellRef].s = {};
+      Object.assign(wsSummary[cellRef].s, {
+        font: { bold: true, color: { rgb: "FFFFFF" } },
+        fill: { fgColor: { rgb: "1E293B" } },
+        alignment: { horizontal: "center" },
+      });
+    }
+    XLSX.utils.book_append_sheet(wb, wsSummary, "RÉCAPITULATIF");
+    existingSheets.add("récapitulatif");
+  }
+
+  // One sheet per rider
+  riderNames.forEach((rider) => {
+    const rData = map[rider];
+    const parcels = rData?.parcels || [];
+
+    const sheetData = parcels.length > 0
+      ? parcels.map((item, idx) => ({
+          "N°": idx + 1,
+          "Colis": item.colis || "",
+          "Statut": item.statut || "Non livré",
+          "Raison / Motif": item.raisonAnnulation || "-",
+          "Destinataire": item.client || "-",
+          "Téléphone": item.telephone || "-",
+          "Adresse": item.adresse || "-",
+          "Montant": item.prix || "-",
+          "N° Tournée": item.tourneeId || rData?.tourneeId || "-",
+          "Date": item.date || rData?.date || "",
+          "Livreur": rider,
+        }))
+      : [
+          {
+            "N°": 1,
+            "Colis": "-",
+            "Statut": "Tous les colis livrés (0 échec)",
+            "Raison / Motif": "-",
+            "Destinataire": "-",
+            "Téléphone": "-",
+            "Adresse": "-",
+            "Montant": "-",
+            "N° Tournée": rData?.tourneeId || "-",
+            "Date": rData?.date || "",
+            "Livreur": rider,
+          }
+        ];
+
+    const ws = XLSX.utils.json_to_sheet(sheetData);
+    ws["!cols"] = [
+      { wch: 6 },  // N°
+      { wch: 22 }, // Colis
+      { wch: 20 }, // Statut
+      { wch: 32 }, // Raison / Motif
+      { wch: 26 }, // Destinataire
+      { wch: 18 }, // Téléphone
+      { wch: 36 }, // Adresse
+      { wch: 16 }, // Montant
+      { wch: 15 }, // N° Tournée
+      { wch: 14 }, // Date
+      { wch: 24 }, // Livreur
+    ];
+
+    const sheetHeaders = [
+      "N°", "Colis", "Statut", "Raison / Motif", "Destinataire",
+      "Téléphone", "Adresse", "Montant", "N° Tournée", "Date", "Livreur",
+    ];
+    XLSX.utils.sheet_add_aoa(ws, [sheetHeaders], { origin: "A1" });
+    for (let col = 0; col < sheetHeaders.length; col++) {
+      const cellRef = XLSX.utils.encode_cell({ r: 0, c: col });
+      if (!ws[cellRef]) ws[cellRef] = {};
+      if (!ws[cellRef].s) ws[cellRef].s = {};
+      Object.assign(ws[cellRef].s, headerStyle);
+    }
+
+    let cleanName = (rider || "Livreur").replace(/[\\/?*[\]:]/g, "_").trim();
+    if (cleanName.length > 28) cleanName = cleanName.substring(0, 28).trim();
+    let safeName = cleanName || "Livreur";
+    let c = 1;
+    while (existingSheets.has(safeName.toLowerCase())) {
+      safeName = `${cleanName.substring(0, 25)}_${c++}`;
+    }
+    existingSheets.add(safeName.toLowerCase());
+
+    XLSX.utils.book_append_sheet(wb, ws, safeName);
+  });
+
+  const wbArrayBuffer = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  const blob = new Blob([wbArrayBuffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const today = new Date();
+  const dateStr = `${String(today.getDate()).padStart(2, "0")}-${String(today.getMonth() + 1).padStart(2, "0")}-${today.getFullYear()}`;
+  const filename = riderNames.length === 1
+    ? `COLIS_NON_LIVRES_${riderNames[0].replace(/\s+/g, "_")}_${dateStr}.xlsx`
+    : `COLIS_NON_LIVRES_${riderNames.length}_LIVREURS_${dateStr}.xlsx`;
+
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, 150);
+
+  return true;
+}
+
+// Single-page direct export for TraitementLivreurExcute
+function exportNonDeliveredExcelFromPage() {
+  const liveData = extractNonDeliveredParcelsFromDOM();
+  saveNonDeliveredParcelsToStorage(liveData).then(() => {
+    chrome.storage.local.get({ gofleet_non_delivered_by_rider: {} }, (res) => {
+      const map = res.gofleet_non_delivered_by_rider || {};
+      if (!map[liveData.livreur] && liveData.parcels.length > 0) {
+        map[liveData.livreur] = liveData;
+      }
+      buildAndDownloadNonDeliveredWorkbook(map);
+    });
+  });
+}
+
+// Multi-rider direct export for Caissier/Caissier
+async function exportAllCaissierRidersExcel() {
+  const btn = document.getElementById("gofleet-caissier-btn-export-non-delivered");
+  const origHtml = btn ? btn.innerHTML : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner" style="width:14px;height:14px;border:2px solid transparent;border-top:2px solid white;border-radius:50%;animation:spin 0.6s linear infinite;display:inline-block;margin-right:6px;vertical-align:middle;"></span> <span>Recherche des livreurs...</span>`;
+  }
+  if (typeof showToast === "function") {
+    showToast("Recherche des tournées et extraction des colis non livrés...", { type: "info", duration: 3000 });
+  }
+
+  try {
+    const results = await fetchAllRidersNonDeliveredParcels((curr, total, name) => {
+      if (btn) {
+        btn.innerHTML = `<span class="spinner" style="width:14px;height:14px;border:2px solid transparent;border-top:2px solid white;border-radius:50%;animation:spin 0.6s linear infinite;display:inline-block;margin-right:6px;vertical-align:middle;"></span> <span>Livreur ${curr}/${total} (${name})...</span>`;
+      }
+    });
+
+    const riderNames = Object.keys(results);
+    if (riderNames.length === 0) {
+      alert("Aucune tournée n'a pu être chargée.");
+      return;
+    }
+
+    let totalParcels = 0;
+    riderNames.forEach((r) => {
+      totalParcels += (results[r]?.parcels || []).length;
+    });
+
+    if (totalParcels === 0) {
+      alert("Tous les colis de toutes les tournées de cette page sont livrés.\nAucun colis en échec/annulé/refusé à exporter.");
+      return;
+    }
+
+    buildAndDownloadNonDeliveredWorkbook(results);
+
+    const successMsg = `✅ Exportation réussie : ${totalParcels} colis non livrés exportés (${riderNames.length} livreur(s)) !`;
+    if (typeof showToast === "function") {
+      showToast(successMsg, { type: "success", duration: 4000 });
+    } else {
+      alert(successMsg);
+    }
+  } catch (err) {
+    console.error("Erreur export caissier:", err);
+    alert(`Erreur d'exportation : ${err.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origHtml;
+    }
+  }
+}
+
+// In-page button for Caissier/Caissier
+function mountCaissierExportButton() {
+  if (!isCaissierPage()) return;
+  if (document.getElementById("gofleet-caissier-btn-export-non-delivered")) return;
+
+  const btn = document.createElement("button");
+  btn.id = "gofleet-caissier-btn-export-non-delivered";
+  btn.type = "button";
+  Object.assign(btn.style, {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "8px",
+    fontSize: "13px",
+    fontWeight: "700",
+    color: "#ffffff",
+    background: "linear-gradient(135deg, #0d9488 0%, #059669 100%)",
+    border: "none",
+    padding: "8px 18px",
+    borderRadius: "10px",
+    cursor: "pointer",
+    boxShadow: "0 2px 8px rgba(13, 148, 136, 0.3)",
+    transition: "all 0.2s ease",
+    verticalAlign: "middle",
+    margin: "8px 6px"
+  });
+  btn.innerHTML = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+      <polyline points="14 2 14 8 20 8"></polyline>
+      <path d="M16 13H8"></path>
+      <path d="M16 17H8"></path>
+      <path d="M10 9H8"></path>
+    </svg>
+    <span>Export Non Livrés (Multi-Feuilles Excel)</span>
+  `;
+
+  btn.onmouseover = () => {
+    btn.style.opacity = "0.92";
+    btn.style.transform = "translateY(-1px)";
+  };
+  btn.onmouseout = () => {
+    btn.style.opacity = "1";
+    btn.style.transform = "translateY(0)";
+  };
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    exportAllCaissierRidersExcel();
+  });
+
+  const dateInput = document.querySelector(
+    "input[name='dateFilter'], input#dateFilter, input[type='date']"
+  );
+  if (dateInput) {
+    const parentForm = dateInput.closest("form") || dateInput.parentElement;
+    const submitBtn = parentForm?.querySelector("button[type='submit'], input[type='submit'], .btn-primary, button.btn");
+    if (submitBtn && submitBtn.parentElement) {
+      submitBtn.parentElement.appendChild(btn);
+      return;
+    }
+    if (parentForm) {
+      parentForm.appendChild(btn);
+      return;
+    }
+  }
+
+  const mount = findTourneeMountPoint();
+  if (mount && mount.parentElement) {
+    mount.parentElement.insertBefore(btn, mount);
+  }
+}
+
+// Auto-cache non-delivered parcels when on TraitementLivreurExcute page
+if (isTraitementLivreurPage()) {
+  setTimeout(() => {
+    const data = extractNonDeliveredParcelsFromDOM();
+    if (data && data.parcels && data.parcels.length > 0) {
+      saveNonDeliveredParcelsToStorage(data);
+    }
+  }, 2200);
+
+  setTimeout(() => {
+    const data = extractNonDeliveredParcelsFromDOM();
+    if (data && data.parcels && data.parcels.length > 0) {
+      saveNonDeliveredParcelsToStorage(data);
+    }
+  }, 4500);
+}
+
+// Auto-mount button on Caissier page
+if (isCaissierPage()) {
+  setTimeout(mountCaissierExportButton, 800);
+  setTimeout(mountCaissierExportButton, 2000);
+}
+// --- End TraitementLivreurExcute Non-Delivered Parcels Export Module ---
+// =========================================================================
+
 function printAllRetourTicketsWithIframes() {
   const allRows = document.querySelectorAll("tr");
   const printUrls = [];
@@ -1806,6 +2550,40 @@ if (
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message && message.action === "ping") {
+    sendResponse({ status: "ok" });
+    return true;
+  }
+
+  if (message.action === "collectAllCaissierRidersParcels") {
+    (async () => {
+      try {
+        const data = await fetchAllRidersNonDeliveredParcels();
+        sendResponse({ status: "ok", data });
+      } catch (err) {
+        sendResponse({ status: "error", message: err.message });
+      }
+    })();
+    return true; // async response
+  }
+
+  if (message.action === "collectNonDeliveredParcels") {
+    try {
+      const data = extractNonDeliveredParcelsFromDOM();
+      saveNonDeliveredParcelsToStorage(data)
+        .then(() => {
+          sendResponse({ status: "ok", data });
+        })
+        .catch(() => {
+          sendResponse({ status: "ok", data });
+        });
+      return true; // async response
+    } catch (e) {
+      sendResponse({ status: "error", message: e.message });
+      return true;
+    }
+  }
+
   if (message.action === "searchTracking") {
     const trackingToFind = message.trackingToFind.trim();
 
@@ -2748,9 +3526,13 @@ if (
             t &&
             (t.id === "gofleet-scan-security-badge" ||
               t.id === "gofleet-scan-security-badge-wrapper" ||
+              t.id === "gofleet-btn-export-non-delivered" ||
+              t.id === "gofleet-caissier-btn-export-non-delivered" ||
               (t.closest &&
                 (t.closest("#gofleet-scan-security-badge") ||
-                  t.closest("#gofleet-scan-security-badge-wrapper"))) ||
+                  t.closest("#gofleet-scan-security-badge-wrapper") ||
+                  t.closest("#gofleet-btn-export-non-delivered") ||
+                  t.closest("#gofleet-caissier-btn-export-non-delivered"))) ||
               t.id === "gofleet-gmh-security-badge" ||
               t.id === "gofleet-gmh-security-badge-wrapper" ||
               (t.closest &&
@@ -3505,6 +4287,49 @@ if (
     }
 
     mountBadgeSafely(badge, input);
+
+    // Mount in-page Export Non Livrés button
+    let exportBtn = document.getElementById("gofleet-btn-export-non-delivered");
+    if (!exportBtn) {
+      exportBtn = document.createElement("button");
+      exportBtn.id = "gofleet-btn-export-non-delivered";
+      exportBtn.type = "button";
+      Object.assign(exportBtn.style, {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "6px",
+        fontSize: "12px",
+        fontWeight: "600",
+        color: "#ffffff",
+        background: "linear-gradient(135deg, #0d9488, #059669)",
+        border: "none",
+        padding: "4px 14px",
+        borderRadius: "20px",
+        cursor: "pointer",
+        marginLeft: "10px",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
+        transition: "all 0.2s ease",
+        verticalAlign: "middle"
+      });
+      exportBtn.innerHTML = `📊 <strong>Exporter Non Livrés (Excel)</strong>`;
+      exportBtn.onmouseover = () => {
+        exportBtn.style.opacity = "0.9";
+        exportBtn.style.transform = "translateY(-1px)";
+      };
+      exportBtn.onmouseout = () => {
+        exportBtn.style.opacity = "1";
+        exportBtn.style.transform = "translateY(0)";
+      };
+      exportBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        exportNonDeliveredExcelFromPage();
+      });
+    }
+
+    if (badge && badge.parentElement && badge.nextElementSibling !== exportBtn) {
+      badge.parentElement.insertBefore(exportBtn, badge.nextElementSibling);
+    }
   }
 
   let badgeUpdateTimeout = null;
@@ -3526,9 +4351,13 @@ if (
           t &&
           (t.id === "gofleet-scan-security-badge" ||
             t.id === "gofleet-scan-security-badge-wrapper" ||
+            t.id === "gofleet-btn-export-non-delivered" ||
+            t.id === "gofleet-caissier-btn-export-non-delivered" ||
             (t.closest &&
               (t.closest("#gofleet-scan-security-badge") ||
-                t.closest("#gofleet-scan-security-badge-wrapper"))))
+                t.closest("#gofleet-scan-security-badge-wrapper") ||
+                t.closest("#gofleet-btn-export-non-delivered") ||
+                t.closest("#gofleet-caissier-btn-export-non-delivered"))))
         );
       });
       if (!isSelfMutation) {
