@@ -5,11 +5,191 @@ function formatDate(date = new Date()) {
   return `${day}/${month}/${year}`;
 }
 
+function getDayAndFormattedDateFr(dateStr = null) {
+  let d;
+  if (dateStr) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      const [y, m, day] = dateStr.split("-").map(Number);
+      d = new Date(y, m - 1, day);
+    } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) {
+      const [day, m, y] = dateStr.split("/").map(Number);
+      d = new Date(y, m - 1, day);
+    } else {
+      d = new Date(dateStr);
+    }
+  } else {
+    d = new Date();
+  }
+  if (isNaN(d.getTime())) d = new Date();
+
+  const daysFr = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
+  const dayName = daysFr[d.getDay()];
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+
+  const dateFormatted = `${dd}/${mm}/${yyyy}`;
+  const dayFull = `${dayName} ${dateFormatted}`;
+  const dateIso = `${yyyy}-${mm}-${dd}`;
+  const dateFile = `${dd}-${mm}-${yyyy}`;
+  return { dayName, dateFormatted, dayFull, dateIso, dateFile };
+}
+
+function classifyParcelAjournAnnule(parcel) {
+  const st = String(parcel?.statut || "").toLowerCase();
+  const rs = String(parcel?.raisonAnnulation || "").toLowerCase();
+  if (st.includes("annul") || st.includes("refus")) return "annule";
+  if (st.includes("ajourn") || st.includes("report")) return "ajourne";
+  if (rs.includes("annul") || rs.includes("refus")) return "annule";
+  if (rs.includes("ajourn") || rs.includes("report") || rs.includes("injoignable") || rs.includes("absent") || rs.includes("pas chez")) return "ajourne";
+  return "ajourne";
+}
+
+function buildRiderSlaDefenseComment({ totalC, livC, ajourneC, annuleC, retNonRec = 0, parcels = [], focusCat = "all" }) {
+  const tCol = Number(totalC) || 0;
+  const liv = Number(livC) || 0;
+  const aj = Number(ajourneC) || 0;
+  const an = Number(annuleC) || 0;
+  if (tCol === 0 && (!parcels || parcels.length === 0)) {
+    return "Aucune tournée / 0 colis assigné";
+  }
+
+  let grcCancel = 0;
+  let badOrderData = 0;
+  let clientRefusal = 0;
+  let clientUnreach = 0;
+  let otherCancel = 0;
+  const orderGroups = {};
+
+  (parcels || []).forEach((p) => {
+    const code = String(p?.colis || "").trim().toUpperCase();
+    const baseMatch = code.match(/^([A-Z]{2,4}\d{8,9})/i);
+    const groupKey = baseMatch ? baseMatch[1] : null;
+
+    if (classifyParcelAjournAnnule(p) === "annule") {
+      const txt = `${p?.raisonAnnulation || ""} ${p?.statut || ""}`.toLowerCase();
+      if (txt.includes("edl 6") || txt.includes("edl\u00a06") || txt.includes("grc") || txt.includes("app") || txt.includes("déjà demand") || txt.includes("deja demand")) {
+        grcCancel++;
+      } else if (txt.includes("edl 9") || txt.includes("edl\u00a09") || txt.includes("edl 3") || txt.includes("edl\u00a03") || txt.includes("téléphone") || txt.includes("telephone") || txt.includes("adresse")) {
+        badOrderData++;
+      } else if (txt.includes("edl 1") || txt.includes("edl\u00a01") || txt.includes("edl 2") || txt.includes("edl\u00a02") || txt.includes("absent") || txt.includes("indisponible") || txt.includes("injoignable") || txt.includes("répond") || txt.includes("repond")) {
+        clientUnreach++;
+      } else if (txt.includes("edl 5") || txt.includes("edl\u00a05") || txt.includes("refus") || txt.includes("prix") || txt.includes("cher")) {
+        clientRefusal++;
+      } else {
+        otherCancel++;
+      }
+      if (groupKey) {
+        orderGroups[groupKey] = (orderGroups[groupKey] || 0) + 1;
+      }
+    }
+  });
+
+  const multiOrders = Object.values(orderGroups).filter((c) => c >= 2);
+  const multiParcelSum = multiOrders.reduce((s, c) => s + c, 0);
+  const multiNote =
+    multiOrders.length > 0
+      ? ` (dont ${multiParcelSum} colis groupés sur ${multiOrders.length} commande(s) client)`
+      : "";
+
+  const extParts = [];
+  if (clientRefusal > 0) extParts.push(`${clientRefusal} refus client [EDL 5]`);
+  if (grcCancel > 0) extParts.push(`${grcCancel} déjà annulé(s) sur GRC/APP [EDL 6]`);
+  if (badOrderData > 0) extParts.push(`${badOrderData} erreur tél/changement adresse [EDL 3/9]`);
+  if (clientUnreach > 0) extParts.push(`${clientUnreach} client absent/injoignable [EDL 1/2]`);
+  if (otherCancel > 0) extParts.push(`${otherCancel} autre(s) annulation(s)`);
+  const extText = extParts.length > 0 ? extParts.join(", ") : `${an} annulation(s) client`;
+
+  const externalTotal = parcels && parcels.length > 0
+    ? grcCancel + badOrderData + clientRefusal + clientUnreach + otherCancel
+    : an;
+  const deliverableBase = Math.max(liv, tCol - externalTotal);
+  const rawRate = tCol > 0 ? (liv / tCol) * 100 : 0;
+  const adjRate = deliverableBase > 0 ? (liv / deliverableBase) * 100 : rawRate;
+  const retTxt = retNonRec > 0 ? ` • ${retNonRec} retour(s) non récupéré(s)` : "";
+
+  if (tCol === 0) {
+    return {
+      analyse: `${aj} ajourné(s), ${an} annulé(s) (${extText})${multiNote}`,
+      comment: `Tournée incomplète (${aj} ajourné(s), ${an} annulé(s)) liée à ${extText}.`,
+    };
+  }
+
+  const gapColis = Math.max(1, Math.ceil(tCol * 0.8) - liv);
+  const analyse = `${liv}/${tCol} livrés (${rawRate.toFixed(1)}%) • ${aj} ajourné(s), ${an} annulé(s) [${extText}] • Taux corrigé : ${adjRate.toFixed(1)}%${retTxt}`;
+
+  let comment = "";
+  if (rawRate >= 80) {
+    const label = rawRate >= 90 ? "Objectif ≥80% largement dépassé" : "Objectif 80% atteint";
+    if (focusCat === "ajourne") {
+      comment = `${label} (${rawRate.toFixed(1)}%). Les ${aj} colis ajournés restent en relance J+1 pendant le pic Black Friday ; taux réel hors annulations client : ${adjRate.toFixed(1)}%.`;
+    } else if (focusCat === "annule") {
+      comment = `${label} (${rawRate.toFixed(1)}%). Les ${an} annulations (${extText}${multiNote}) sont imputables aux clients/GRC ; taux opérationnel réel : ${adjRate.toFixed(1)}%.`;
+    } else {
+      comment = `${label} (${rawRate.toFixed(1)}%). Malgré ${an} annulation(s) client/GRC (${extText}), la performance réelle sur colis livrables atteint ${adjRate.toFixed(1)}%.`;
+    }
+  } else {
+    const validatedTxt = adjRate >= 80
+      ? ` — preuve que l'objectif ≥80% est respecté dès retrait des causes externes`
+      : ` — écart fortement réduit sans les refus/erreurs client`;
+    if (focusCat === "ajourne") {
+      comment = `Sous le seuil de 80% (à ${gapColis} colis en pic Black Friday) : ${aj} colis reportés en relance J+1 et ${an} annulation(s) hors contrôle (${extText}${multiNote}). Taux réel corrigé : ${adjRate.toFixed(1)}%${validatedTxt}.`;
+    } else {
+      comment = `Sous le seuil de 80% (à ${gapColis} colis en pic Black Friday) à cause de ${an} annulation(s) hors responsabilité livreur (${extText}${multiNote})${aj > 0 ? ` et de ${aj} colis ajourné(s) en relance J+1` : ""}. Hors facteurs client/GRC, le livreur réalise ${adjRate.toFixed(1)}%${validatedTxt}.`;
+    }
+  }
+
+  return { analyse, comment };
+}
+
+async function fetchAiRiderSlaComments(riderPayloads) {
+  try {
+    const { gofleet_gemini_api_key = "", gofleet_use_ai_comments = false } = await chrome.storage.local.get({
+      gofleet_gemini_api_key: "",
+      gofleet_use_ai_comments: false,
+    });
+    const apiKey = String(gofleet_gemini_api_key || "").trim();
+    if (!gofleet_use_ai_comments || !apiKey || !Array.isArray(riderPayloads) || riderPayloads.length === 0) {
+      return {};
+    }
+
+    const prompt =
+      "Tu es responsable des opérations de livraison partenaire de Marjane Mall pendant le Black Friday (cible SLA : 80%). " +
+      "Pour chaque livreur dans le JSON ci-dessous, rédige un commentaire professionnel et convaincant en français (1 à 2 phrases max, ton factuel pour défendre le livreur auprès de Marjane Mall) " +
+      "expliquant pourquoi le seuil de 80% n'a pas été atteint (ou comment la performance est solide) en citant les vrais chiffres (EDL 5 refus client, EDL 6 déjà annulé GRC/APP, EDL 3/9 adresse ou téléphone erroné, EDL 1/2 absent/injoignable, colis ajournés en relance J+1, commandes multi-colis et taux hors facteurs client). " +
+      "Retourne UNIQUEMENT un objet JSON { \"NOM_LIVREUR\": \"commentaire\" }.\nDonnées :\n" +
+      JSON.stringify(riderPayloads);
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: "application/json", temperature: 0.3 },
+      }),
+    });
+    if (!resp.ok) return {};
+    const json = await resp.json();
+    const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) return {};
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (err) {
+    console.warn("[GoFleet AI] Repli sur le moteur local (Gemini indisponible):", err);
+    return {};
+  }
+}
+
 async function generateDeliveryExcel(customData = null, targetDateStr = null) {
   try {
     let deliveryBoys = customData;
+    const stored = await chrome.storage.local.get([
+      "deliveryBoys",
+      "gofleet_non_delivered_by_rider",
+      "gofleet_non_delivered_history",
+    ]);
     if (!deliveryBoys || !deliveryBoys.length) {
-      const stored = await chrome.storage.local.get("deliveryBoys");
       deliveryBoys = stored.deliveryBoys || [];
     }
 
@@ -18,37 +198,27 @@ async function generateDeliveryExcel(customData = null, targetDateStr = null) {
       return;
     }
 
-    function getDayAndFormattedDate(dateStr = null) {
-      let d;
-      if (dateStr) {
-        if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-          const [y, m, day] = dateStr.split("-").map(Number);
-          d = new Date(y, m - 1, day);
-        } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) {
-          const [day, m, y] = dateStr.split("/").map(Number);
-          d = new Date(y, m - 1, day);
-        } else {
-          d = new Date(dateStr);
-        }
-      } else {
-        d = new Date();
+    const { dayName, dateFormatted, dayFull, dateIso } = getDayAndFormattedDateFr(targetDateStr);
+    const historyForDate = (stored.gofleet_non_delivered_history || {})[dateIso] || {};
+    const byRiderMap = stored.gofleet_non_delivered_by_rider || {};
+    const nonDeliveredMap = { ...byRiderMap, ...historyForDate };
+    const normalizeRiderKey = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+    const toIsoSafe = (ds) => {
+      if (!ds) return null;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(ds)) return ds;
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(ds)) {
+        const [d, m, y] = ds.split("/");
+        return `${y}-${m}-${d}`;
       }
-      if (isNaN(d.getTime())) d = new Date();
-
-      const daysFr = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
-      const dayName = daysFr[d.getDay()];
-      const dd = String(d.getDate()).padStart(2, "0");
-      const mm = String(d.getMonth() + 1).padStart(2, "0");
-      const yyyy = d.getFullYear();
-
-      const dateFormatted = `${dd}/${mm}/${yyyy}`;
-      const dayFull = `${dayName} ${dateFormatted}`;
-      const dateIso = `${yyyy}-${mm}-${dd}`;
-
-      return { dayName, dateFormatted, dayFull, dateIso };
-    }
-
-    const { dayName, dateFormatted, dayFull, dateIso } = getDayAndFormattedDate(targetDateStr);
+      return null;
+    };
+    const nonDeliveredByRider = new Map();
+    const nonDeliveredByTournee = new Map();
+    Object.entries(nonDeliveredMap).forEach(([k, v]) => {
+      const tagged = historyForDate[k] === v ? { ...v, __fromDateHistory: true } : v;
+      nonDeliveredByRider.set(normalizeRiderKey(k), tagged);
+      if (v && v.tourneeId) nonDeliveredByTournee.set(String(v.tourneeId), tagged);
+    });
     const wb = await XlsxPopulate.fromBlankAsync();
     const ws = wb.sheet(0);
     ws.name(`SYNTHESE_${dateIso}`);
@@ -61,13 +231,13 @@ async function generateDeliveryExcel(customData = null, targetDateStr = null) {
       C: 28,  // Livreur / Tournée
       D: 15,  // Total Colis
       E: 15,  // Livrés
-      F: 15,  // Non Livrés
-      G: 19,  // Taux Livraison
+      F: 15,  // Ajourné
+      G: 18,  // Annulé
       H: 19,  // Retours Récupérés
       I: 21,  // Retours Non Récupérés
-      J: 17,  // Taux Récupération
-      K: 14,  // Écart
-      L: 22   // Performance
+      J: 20,  // Taux de Livraison (%)
+      K: 50,  // Analyse des Écarts
+      L: 74   // Commentaire (Défense SLA 80%)
     };
     for (const [col, w] of Object.entries(colWidths)) {
       ws.column(col).width(w);
@@ -104,26 +274,29 @@ async function generateDeliveryExcel(customData = null, targetDateStr = null) {
     ws.row(3).height(8);
 
     // Rows 4-6: KPI Cards
-    ws.row(4).height(20);
-    ws.row(5).height(18);
-    ws.row(6).height(18);
+    ws.row(4).height(22);
+    ws.row(5).height(22);
+    ws.row(6).height(22);
 
     const startRow = 9;
     const endRow = startRow + deliveryBoys.length - 1;
 
-    function styleCard(colStart, colEnd, title, titleFill, titleColor, formulaOrVal, valColor, borderColor, isPct = false, isDate = false) {
-      ws.range(colStart + "4:" + colEnd + "4").merged(true).value(title)
+    function styleCard(colStart, colEnd, title, titleFill, titleColor, formulaOrVal, valColor, borderColor, isPct = false, isDate = false, isBig = false) {
+      const titleTarget = colStart === colEnd
+        ? ws.cell(colStart + "4")
+        : ws.range(colStart + "4:" + colEnd + "4").merged(true);
+      titleTarget.value(title)
         .style({
           fill: titleFill,
           fontColor: titleColor,
           bold: true,
-          fontSize: 8.5,
+          fontSize: isBig ? 10.5 : 8.5,
           fontFamily: "Segoe UI",
           horizontalAlignment: "center",
           verticalAlignment: "center",
-          topBorder: "thin",
-          leftBorder: "thin",
-          rightBorder: "thin",
+          topBorder: isBig ? "medium" : "thin",
+          leftBorder: isBig ? "medium" : "thin",
+          rightBorder: isBig ? "medium" : "thin",
           bottomBorder: "none",
           borderColor: borderColor
         });
@@ -137,25 +310,25 @@ async function generateDeliveryExcel(customData = null, targetDateStr = null) {
         fill: "FFFFFF",
         fontColor: valColor,
         bold: true,
-        fontSize: isDate ? 11 : 16,
+        fontSize: isBig ? 22 : (isDate ? 11 : 16),
         fontFamily: "Segoe UI",
         horizontalAlignment: "center",
         verticalAlignment: "center",
-        bottomBorder: "thin",
-        leftBorder: "thin",
-        rightBorder: "thin",
+        bottomBorder: isBig ? "medium" : "thin",
+        leftBorder: isBig ? "medium" : "thin",
+        rightBorder: isBig ? "medium" : "thin",
         topBorder: "none",
         borderColor: borderColor,
         numberFormat: isDate ? "dddd dd/mm/yyyy" : (isPct ? "0.0%" : "#,##0")
       });
     }
 
-    styleCard("A", "B", "📅 JOUR DE L'EXPORT", "F1F5F9", "334155", dayFull, "0F172A", "CBD5E1", false, true);
-    styleCard("C", "D", "📦 TOTAL COLIS ASSIGNÉS", "F1F5F9", "475569", `SUM(D${startRow}:D${endRow})`, "0F172A", "CBD5E1");
-    styleCard("E", "F", "✅ TOTAL COLIS LIVRÉS", "ECFDF5", "065F46", `SUM(E${startRow}:E${endRow})`, "059669", "A7F3D0");
-    styleCard("G", "H", "❌ TOTAL NON LIVRÉS", "FFF1F2", "9F1239", `SUM(F${startRow}:F${endRow})`, "E11D48", "FECDD3");
-    styleCard("I", "J", "🎯 TAUX LIVRAISON GLOBAL", "EFF6FF", "1E40AF", "IF(C5>0, E5/C5, 0)", "2563EB", "BFDBFE", true);
-    styleCard("K", "L", "🔄 TAUX RÉCUPÉRATION RETOURS", "F0FDFA", "115E59", `IF((SUM(H${startRow}:H${endRow})+SUM(I${startRow}:I${endRow}))>0, SUM(H${startRow}:H${endRow})/(SUM(H${startRow}:H${endRow})+SUM(I${startRow}:I${endRow})), 1)`, "0D9488", "99F6E4", true);
+    styleCard("A", "B", "📅 JOUR DE L'EXPORT", "F1F5F9", "334155", dayFull, "0F172A", "CBD5E1", false, true, false);
+    styleCard("C", "D", "📦 TOTAL COLIS ASSIGNÉS", "F1F5F9", "475569", `SUM(D${startRow}:D${endRow})`, "0F172A", "CBD5E1", false, false, false);
+    styleCard("E", "F", "✅ TOTAL COLIS LIVRÉS", "ECFDF5", "065F46", `SUM(E${startRow}:E${endRow})`, "059669", "A7F3D0", false, false, false);
+    styleCard("G", "G", "⏸️ COLIS AJOURNÉ", "FFFBEB", "B45309", `SUM(F${startRow}:F${endRow})`, "D97706", "FDE68A", false, false, false);
+    styleCard("H", "H", "❌ COLIS ANNULÉ", "FFF1F2", "9F1239", `SUM(G${startRow}:G${endRow})`, "E11D48", "FECDD3", false, false, false);
+    styleCard("I", "L", "🎯 TAUX LIVRAISON GLOBAL", "EFF6FF", "1E40AF", "IF(C5>0, E5/C5, 0)", "2563EB", "2563EB", true, false, true);
 
     // Row 7: Spacer
     ws.row(7).height(10);
@@ -168,13 +341,13 @@ async function generateDeliveryExcel(customData = null, targetDateStr = null) {
       { col: "C", text: "Livreur / Tournée" },
       { col: "D", text: "Total Colis" },
       { col: "E", text: "Livrés" },
-      { col: "F", text: "Non Livrés" },
-      { col: "G", text: "Taux Livraison (%)" },
+      { col: "F", text: "Ajourné" },
+      { col: "G", text: "Annulé" },
       { col: "H", text: "Retours Récupérés" },
       { col: "I", text: "Retours Non Récupérés" },
-      { col: "J", text: "Taux Récup. (%)" },
-      { col: "K", text: "Écart Colis" },
-      { col: "L", text: "Statut Performance" },
+      { col: "J", text: "Taux de Livraison (%)" },
+      { col: "K", text: "Analyse des Écarts" },
+      { col: "L", text: "Commentaire (Défense SLA 80%)" },
     ];
 
     headers.forEach((h) => {
@@ -191,39 +364,142 @@ async function generateDeliveryExcel(customData = null, targetDateStr = null) {
       });
     });
 
-    deliveryBoys.forEach((entry, index) => {
+    const preparedRows = deliveryBoys.map((entry) => {
+      const totalC = Number(entry.totalColis) || 0;
+      const livC = Number(entry.livree) || 0;
+      const nonLivC = Number(entry.nonLivree) || 0;
+      const retRec = Number(entry.retourRecupere) || 0;
+      const retNonRec = Number(entry.retourNonRecupere) || 0;
+      const rate = totalC > 0 ? livC / totalC : 0;
+
+      // Resolve Ajourné & Annulé from entry (live enriched) or cached TraitementLivreur parcels
+      const cachedND =
+        (entry.tourneeId && nonDeliveredByTournee.get(String(entry.tourneeId))) ||
+        nonDeliveredByRider.get(normalizeRiderKey(entry.name));
+      const cachedIso = cachedND?.dateIso ? toIsoSafe(cachedND.dateIso) : toIsoSafe(cachedND?.date);
+      const isAdjacentDay =
+        cachedIso &&
+        Math.abs(new Date(cachedIso).getTime() - new Date(dateIso).getTime()) <= 86400000;
+      const sameTournee =
+        entry.tourneeId && cachedND?.tourneeId && String(entry.tourneeId) === String(cachedND.tourneeId);
+      const sameDateCached =
+        !!cachedND &&
+        (!!cachedND.__fromDateHistory ||
+          sameTournee ||
+          !cachedND.date ||
+          cachedND.date === dateFormatted ||
+          cachedND.date === dateIso ||
+          cachedIso === dateIso ||
+          isAdjacentDay);
+
+      let ajourneC = typeof entry.ajourne === "number" ? entry.ajourne : null;
+      let annuleC = typeof entry.annule === "number" ? entry.annule : null;
+
+      const isValidParcelItem = (p) => {
+        if (!p) return false;
+        const st = String(p.statut || "").toLowerCase();
+        const code = String(p.colis || "").trim().toUpperCase();
+        if (code.startsWith("RET")) return false;
+        return !(
+          st.includes("retour") ||
+          st.includes("récupér") ||
+          st.includes("recupere") ||
+          st.includes("reçu hub") ||
+          st.includes("recu hub") ||
+          st.includes("reçu au hub") ||
+          st.includes("recu au hub") ||
+          st.includes("affecté") ||
+          st.includes("affecte") ||
+          st.includes("assigné") ||
+          st.includes("assigne") ||
+          st.includes("ramassage")
+        );
+      };
+
+      const validCachedParcels = sameDateCached && Array.isArray(cachedND.parcels)
+        ? cachedND.parcels.filter(isValidParcelItem)
+        : [];
+
+      if (validCachedParcels.length > 0) {
+        let aCnt = 0;
+        let cCnt = 0;
+        validCachedParcels.forEach((p) => {
+          if (classifyParcelAjournAnnule(p) === "annule") cCnt++;
+          else aCnt++;
+        });
+        ajourneC = aCnt;
+        annuleC = cCnt;
+      }
+      if (ajourneC === null) ajourneC = 0;
+      if (annuleC === null) annuleC = 0;
+
+      const slaInfo = buildRiderSlaDefenseComment({
+        totalC,
+        livC,
+        ajourneC,
+        annuleC,
+        retNonRec,
+        parcels: validCachedParcels,
+        focusCat: "all",
+      });
+
+      return {
+        entry, totalC, livC, nonLivC, retRec, retNonRec, rate, ajourneC, annuleC, validCachedParcels,
+        analyseTxt: slaInfo.analyse,
+        commentTxt: slaInfo.comment,
+      };
+    });
+
+    const aiCommentsMap = await fetchAiRiderSlaComments(
+      preparedRows.map((p) => ({
+        livreur: p.entry.name,
+        total: p.totalC,
+        livres: p.livC,
+        ajournes: p.ajourneC,
+        annules: p.annuleC,
+        motifs: p.validCachedParcels.map((x) => ({ statut: x.statut, motif: x.raisonAnnulation || "" })),
+      }))
+    );
+
+    preparedRows.forEach((item, index) => {
       const r = startRow + index;
-      ws.row(r).height(22);
       const bg = (index % 2 === 0) ? "FFFFFF" : "F8FAFC";
+      const { entry, totalC, livC, retRec, retNonRec, rate, ajourneC, annuleC, analyseTxt, commentTxt } = item;
+      const aiText = aiCommentsMap[entry.name] || aiCommentsMap[normalizeRiderKey(entry.name)];
+      const finalComment = aiText && String(aiText).trim() ? String(aiText).trim() : commentTxt;
 
       ws.cell("A" + r).value(index + 1).style({ fill: bg, fontColor: "64748B", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
       ws.cell("B" + r).value(dayFull).style({ fill: bg, fontColor: "475569", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
       ws.cell("C" + r).value(entry.name).style({ fill: bg, fontColor: "1E293B", bold: true, horizontalAlignment: "left", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
-      ws.cell("D" + r).value(Number(entry.totalColis) || 0).style({ fill: bg, fontColor: "0F172A", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "#,##0" });
-      ws.cell("E" + r).value(Number(entry.livree) || 0).style({ fill: "F0FDF4", fontColor: "059669", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "#,##0" });
-      ws.cell("F" + r).value(Number(entry.nonLivree) || 0).style({ fill: "FFF1F2", fontColor: "E11D48", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "#,##0" });
-      ws.cell("G" + r).formula(`IF(D${r}>0, E${r}/D${r}, 0)`).style({ fill: bg, fontColor: "2563EB", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "0.0%" });
-      ws.cell("H" + r).value(Number(entry.retourRecupere) || 0).style({ fill: bg, fontColor: "0D9488", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "#,##0" });
-      ws.cell("I" + r).value(Number(entry.retourNonRecupere) || 0).style({ fill: bg, fontColor: "64748B", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "#,##0" });
-      ws.cell("J" + r).formula(`IF((H${r}+I${r})>0, H${r}/(H${r}+I${r}), 1)`).style({ fill: bg, fontColor: "0D9488", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "0.0%" });
-      ws.cell("K" + r).formula(`D${r}-(E${r}+F${r})`).style({ fill: bg, fontColor: "64748B", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
-      ws.cell("L" + r).formula(`IF(D${r}=0, "-", IF(G${r}>=0.9, "⭐⭐⭐ Excellente", IF(G${r}>=0.8, "⭐⭐ Standard", "⚠️ À Surveiller")))`).style({ fill: bg, fontColor: "1E293B", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
+      ws.cell("D" + r).value(totalC).style({ fill: bg, fontColor: "0F172A", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "#,##0" });
+      ws.cell("E" + r).value(livC).style({ fill: "F0FDF4", fontColor: "059669", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "#,##0" });
+      ws.cell("F" + r).value(ajourneC).style({ fill: "FFFBEB", fontColor: "B45309", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "#,##0" });
+      ws.cell("G" + r).value(annuleC).style({ fill: "FFF1F2", fontColor: "E11D48", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "#,##0" });
+      ws.cell("H" + r).value(retRec).style({ fill: bg, fontColor: "0D9488", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "#,##0" });
+      ws.cell("I" + r).value(retNonRec).style({ fill: bg, fontColor: "64748B", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "#,##0" });
+      ws.cell("J" + r).formula(`IF(D${r}>0, E${r}/D${r}, 0)`).style({ fill: bg, fontColor: "2563EB", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "0.0%" });
+
+      const analysisColor = totalC === 0 ? "64748B" : rate >= 0.9 ? "065F46" : rate >= 0.8 ? "92400E" : "9F1239";
+      ws.cell("K" + r).value(analyseTxt).style({ fill: bg, fontColor: "334155", fontSize: 9, horizontalAlignment: "left", verticalAlignment: "center", wrapText: true, border: "thin", borderColor: "E2E8F0" });
+      ws.cell("L" + r).value(finalComment).style({ fill: bg, fontColor: analysisColor, fontSize: 9, bold: rate < 0.8, horizontalAlignment: "left", verticalAlignment: "center", wrapText: true, border: "thin", borderColor: "E2E8F0" });
+      const neededLines = Math.max(Math.ceil(analyseTxt.length / 44), Math.ceil(finalComment.length / 66));
+      ws.row(r).height(Math.max(36, neededLines * 15 + 10));
     });
 
     // Total row
     const totalRow = endRow + 1;
-    ws.row(totalRow).height(26);
+    ws.row(totalRow).height(28);
     ws.range(`A${totalRow}:C${totalRow}`).merged(true).value(`TOTAL GÉNÉRAL (${deliveryBoys.length} livreurs)`)
       .style({ fill: "0F172A", fontColor: "FFFFFF", bold: true, fontSize: 10, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A" });
     ws.cell(`D${totalRow}`).formula(`SUM(D${startRow}:D${endRow})`).style({ fill: "0F172A", fontColor: "FFFFFF", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: "#,##0" });
     ws.cell(`E${totalRow}`).formula(`SUM(E${startRow}:E${endRow})`).style({ fill: "0F172A", fontColor: "34D399", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: "#,##0" });
-    ws.cell(`F${totalRow}`).formula(`SUM(F${startRow}:F${endRow})`).style({ fill: "0F172A", fontColor: "F87171", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: "#,##0" });
-    ws.cell(`G${totalRow}`).formula(`IF(D${totalRow}>0, E${totalRow}/D${totalRow}, 0)`).style({ fill: "0F172A", fontColor: "60A5FA", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: "0.0%" });
+    ws.cell(`F${totalRow}`).formula(`SUM(F${startRow}:F${endRow})`).style({ fill: "0F172A", fontColor: "FBBF24", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: "#,##0" });
+    ws.cell(`G${totalRow}`).formula(`SUM(G${startRow}:G${endRow})`).style({ fill: "0F172A", fontColor: "F87171", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: "#,##0" });
     ws.cell(`H${totalRow}`).formula(`SUM(H${startRow}:H${endRow})`).style({ fill: "0F172A", fontColor: "2DD4BF", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: "#,##0" });
     ws.cell(`I${totalRow}`).formula(`SUM(I${startRow}:I${endRow})`).style({ fill: "0F172A", fontColor: "CBD5E1", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: "#,##0" });
-    ws.cell(`J${totalRow}`).formula(`IF((H${totalRow}+I${totalRow})>0, H${totalRow}/(H${totalRow}+I${totalRow}), 1)`).style({ fill: "0F172A", fontColor: "2DD4BF", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: "0.0%" });
-    ws.cell(`K${totalRow}`).formula(`D${totalRow}-(E${totalRow}+F${totalRow})`).style({ fill: "0F172A", fontColor: "FFFFFF", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A" });
-    ws.cell(`L${totalRow}`).formula(`IF(D${totalRow}=0, "-", IF(G${totalRow}>=0.9, "⭐⭐⭐ Excellente", IF(G${totalRow}>=0.8, "⭐⭐ Standard", "⚠️ À Surveiller")))`).style({ fill: "0F172A", fontColor: "FCD34D", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A" });
+    ws.cell(`J${totalRow}`).formula(`IF(D${totalRow}>0, E${totalRow}/D${totalRow}, 0)`).style({ fill: "0F172A", fontColor: "60A5FA", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: "0.0%" });
+    ws.cell(`K${totalRow}`).formula(`"Taux global : " & TEXT(J${totalRow},"0.0%") & " (" & E${totalRow} & "/" & D${totalRow} & " livrés, " & F${totalRow} & " aj., " & G${totalRow} & " ann.)"`).style({ fill: "0F172A", fontColor: "E2E8F0", fontSize: 9, horizontalAlignment: "left", verticalAlignment: "center", wrapText: true, border: "thin", borderColor: "0F172A" });
+    ws.cell(`L${totalRow}`).value("Synthèse SLA Black Friday (Cible 80%)").style({ fill: "0F172A", fontColor: "94A3B8", italic: true, fontSize: 9, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A" });
 
     const blob = await wb.outputAsync("blob");
     const url = URL.createObjectURL(blob);
@@ -559,6 +835,57 @@ async function sendTabMessageWithFallback(tabId, message, tabUrl = "") {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  // Optional Gemini AI Comments settings initialization
+  const enableAiCheckbox = document.getElementById("enableAiComments");
+  const geminiKeyRow = document.getElementById("geminiKeyRow");
+  const geminiApiInput = document.getElementById("geminiApiKeyInput");
+  const saveGeminiBtn = document.getElementById("saveGeminiKeyBtn");
+  const aiModeBadge = document.getElementById("aiModeBadge");
+
+  function updateAiUi(enabled, hasKey) {
+    if (geminiKeyRow) geminiKeyRow.style.display = enabled ? "flex" : "none";
+    if (aiModeBadge) {
+      if (enabled && hasKey) {
+        aiModeBadge.textContent = "IA Active";
+        aiModeBadge.style.background = "#e0e7ff";
+        aiModeBadge.style.color = "#4338ca";
+      } else if (enabled) {
+        aiModeBadge.textContent = "Clé requise";
+        aiModeBadge.style.background = "#fef3c7";
+        aiModeBadge.style.color = "#b45309";
+      } else {
+        aiModeBadge.textContent = "Mode Local";
+        aiModeBadge.style.background = "#f1f5f9";
+        aiModeBadge.style.color = "#475569";
+      }
+    }
+  }
+
+  if (enableAiCheckbox) {
+    const aiCfg = await chrome.storage.local.get({ gofleet_gemini_api_key: "", gofleet_use_ai_comments: false });
+    enableAiCheckbox.checked = !!aiCfg.gofleet_use_ai_comments;
+    if (geminiApiInput && aiCfg.gofleet_gemini_api_key) {
+      geminiApiInput.value = aiCfg.gofleet_gemini_api_key;
+    }
+    updateAiUi(!!aiCfg.gofleet_use_ai_comments, !!(aiCfg.gofleet_gemini_api_key || "").trim());
+
+    enableAiCheckbox.addEventListener("change", async () => {
+      const checked = enableAiCheckbox.checked;
+      await chrome.storage.local.set({ gofleet_use_ai_comments: checked });
+      updateAiUi(checked, !!(geminiApiInput?.value || "").trim());
+    });
+  }
+
+  if (saveGeminiBtn && geminiApiInput) {
+    saveGeminiBtn.addEventListener("click", async () => {
+      const val = geminiApiInput.value.trim();
+      await chrome.storage.local.set({ gofleet_gemini_api_key: val });
+      updateAiUi(!!enableAiCheckbox?.checked, !!val);
+      saveGeminiBtn.textContent = "✓";
+      setTimeout(() => { saveGeminiBtn.textContent = "OK"; }, 1200);
+    });
+  }
+
   document.getElementById("printRetour").addEventListener("click", async () => {
     const [tab] = await chrome.tabs.query({
       active: true,
@@ -683,61 +1010,81 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  document
-    .getElementById("exportLivreur")
-    .addEventListener("click", async () => {
-      const selectedDate = livreurSelect?.value || "CURRENT";
+  const exportLivreurBtn = document.getElementById("exportLivreur");
+  if (exportLivreurBtn) {
+    exportLivreurBtn.addEventListener("click", async () => {
+      const originalHtml = exportLivreurBtn.innerHTML;
+      try {
+        exportLivreurBtn.disabled = true;
+        exportLivreurBtn.innerHTML = `
+          <div class="button-content" style="flex-direction: row; align-items: center; justify-content: center; width: 100%; gap: 10px;">
+            <span class="spinner"></span>
+            <span style="font-weight: 600;">Extraction Caissier & Traitement...</span>
+          </div>
+        `;
 
-      // If user selected a specific historical date from dropdown
-      if (selectedDate !== "CURRENT") {
-        const { caissier_history = {} } = await chrome.storage.local.get(
-          "caissier_history"
-        );
-        const historyItem = caissier_history[selectedDate];
-        if (
-          historyItem &&
-          historyItem.deliveryBoys &&
-          historyItem.deliveryBoys.length > 0
-        ) {
-          await generateDeliveryExcel(historyItem.deliveryBoys, selectedDate);
-          alert(
-            `Export Excel réussi depuis l'historique pour le ${selectedDate} (${historyItem.deliveryBoys.length} livreurs) !`
+        const selectedDate = livreurSelect?.value || "CURRENT";
+
+        // If user selected a specific historical date from dropdown
+        if (selectedDate !== "CURRENT") {
+          const { caissier_history = {} } = await chrome.storage.local.get(
+            "caissier_history"
           );
-          return;
-        } else {
-          alert(
-            `Aucune donnée trouvée dans l'historique pour le ${selectedDate}.`
-          );
+          const historyItem = caissier_history[selectedDate];
+          if (
+            historyItem &&
+            historyItem.deliveryBoys &&
+            historyItem.deliveryBoys.length > 0
+          ) {
+            await generateDeliveryExcel(historyItem.deliveryBoys, selectedDate);
+            alert(
+              `Export Excel réussi depuis l'historique pour le ${selectedDate} (${historyItem.deliveryBoys.length} livreurs) !`
+            );
+            return;
+          } else {
+            alert(
+              `Aucune donnée trouvée dans l'historique pour le ${selectedDate}.`
+            );
+            return;
+          }
+        }
+
+        // Default: Collect from active tab
+        const [tab] = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
+
+        if (!tab) {
+          alert("Aucun onglet actif trouvé.");
           return;
         }
-      }
 
-      // Default: Collect from active tab
-      const [tab] = await chrome.tabs.query({
-        active: true,
-        currentWindow: true,
-      });
+        const result = await sendTabMessageWithFallback(
+          tab.id,
+          { action: "collectDeliveryBoyData" },
+          tab.url
+        );
 
-      if (!tab) {
-        alert("Aucun onglet actif trouvé.");
-        return;
-      }
-
-      const result = await chrome.tabs.sendMessage(tab.id, {
-        action: "collectDeliveryBoyData",
-      });
-
-      if (result?.status === "ok") {
-        const msg = result.fromHistory
-          ? `Données livreur récupérées depuis l'historique (${result.date}) !`
-          : "Données livreur récupérées avec succès !";
-        alert(msg);
-        console.log(result.deliveryBoys);
-        await generateDeliveryExcel(result.deliveryBoys, result.date);
-      } else {
-        alert(result?.message || "Échec de la récupération des données.");
+        if (result?.status === "ok") {
+          const msg = result.fromHistory
+            ? `Données livreur récupérées depuis l'historique (${result.date}) !`
+            : "Données livreur & statuts TraitementLivreur récupérés avec succès !";
+          alert(msg);
+          console.log(result.deliveryBoys);
+          await generateDeliveryExcel(result.deliveryBoys, result.date);
+        } else {
+          alert(result?.message || "Échec de la récupération des données.");
+        }
+      } catch (err) {
+        console.error("exportLivreur failed:", err);
+        alert(err.message || "Échec de l'exportation des livreurs.");
+      } finally {
+        exportLivreurBtn.disabled = false;
+        exportLivreurBtn.innerHTML = originalHtml;
       }
     });
+  }
 
   document
     .getElementById("exportEchecCasa")
@@ -1290,88 +1637,186 @@ document.addEventListener("DOMContentLoaded", async () => {
     return candidate;
   }
 
-  async function buildSleekNonDeliveredWorkbook(map) {
+  async function buildSleekNonDeliveredWorkbook(map, deliveryBoys = []) {
     const riderNames = Object.keys(map || {});
     if (riderNames.length === 0) {
-      alert("Aucun colis non livré (annulé ou refusé) n'a été trouvé.");
+      alert("Aucun colis non livré (ajourné ou annulé) n'a été trouvé.");
       return { success: false };
     }
 
-    // 1. Gather all parcels & compute analytics
+    const normalizeKey = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+    const deliveryByRider = new Map();
+    (deliveryBoys || []).forEach((b) => {
+      if (b && b.name) deliveryByRider.set(normalizeKey(b.name), b);
+    });
+
+    const isReturnParcel = (p) => {
+      const st = String(p?.statut || "").toLowerCase();
+      const code = String(p?.colis || "").trim().toUpperCase();
+      return (
+        code.startsWith("RET") ||
+        st.includes("retour") ||
+        st.includes("récupér") ||
+        st.includes("recupere") ||
+        st.includes("reçu hub") ||
+        st.includes("recu hub") ||
+        st.includes("reçu au hub") ||
+        st.includes("recu au hub") ||
+        st.includes("affecté") ||
+        st.includes("affecte") ||
+        st.includes("assigné") ||
+        st.includes("assigne") ||
+        st.includes("ramassage")
+      );
+    };
+
+    // 1. Gather all parcels & compute separated Ajourné vs Annulé analytics
     let totalParcelsCount = 0;
-    let totalCRBT = 0;
-    const motifCounts = {};
-    const statusCounts = {};
+    let totalAjournes = 0;
+    let totalAnnules = 0;
+    const repartitionCounts = {};
     const riderStats = [];
 
     riderNames.forEach((name) => {
       const r = map[name] || {};
-      const parcels = r.parcels || [];
-      totalParcelsCount += parcels.length;
-      let rAmount = 0;
-      const rMotifs = {};
+      const validParcels = (r.parcels || []).filter((p) => p && !isReturnParcel(p));
+      totalParcelsCount += validParcels.length;
 
-      parcels.forEach((p) => {
-        const priceVal =
-          parseFloat(
-            String(p.prix || "")
-              .replace(/[^0-9.,]/g, "")
-              .replace(",", ".")
-          ) || 0;
-        totalCRBT += priceVal;
-        rAmount += priceVal;
+      const ajournesList = [];
+      const annulesList = [];
+      const rAjourneMotifs = {};
+      const rAnnuleMotifs = {};
 
-        const motif = (p.raisonAnnulation || "Non spécifié").trim();
-        if (!motifCounts[motif]) motifCounts[motif] = { count: 0, amount: 0 };
-        motifCounts[motif].count++;
-        motifCounts[motif].amount += priceVal;
-
-        rMotifs[motif] = (rMotifs[motif] || 0) + 1;
-
-        const stat = (p.statut || "Non livré").trim();
-        if (!statusCounts[stat]) statusCounts[stat] = { count: 0, amount: 0 };
-        statusCounts[stat].count++;
-        statusCounts[stat].amount += priceVal;
+      validParcels.forEach((p) => {
+        const cat = classifyParcelAjournAnnule(p);
+        const rawMotif = (p.raisonAnnulation || "").trim();
+        if (cat === "annule") {
+          const motif = rawMotif || "Annulé / Refusé (Motif non renseigné)";
+          annulesList.push({ ...p, _resolvedMotif: motif });
+          const repKey = `annule::${motif}`;
+          if (!repartitionCounts[repKey]) repartitionCounts[repKey] = { label: motif, cat: "annule", count: 0 };
+          repartitionCounts[repKey].count++;
+          rAnnuleMotifs[motif] = (rAnnuleMotifs[motif] || 0) + 1;
+          totalAnnules++;
+        } else {
+          const ajLabel = rawMotif || (p.statut || "Colis Ajourné").trim();
+          ajournesList.push({ ...p, _resolvedMotif: rawMotif || "-" });
+          const repKey = `ajourne::${ajLabel}`;
+          if (!repartitionCounts[repKey]) repartitionCounts[repKey] = { label: ajLabel, cat: "ajourne", count: 0 };
+          repartitionCounts[repKey].count++;
+          rAjourneMotifs[ajLabel] = (rAjourneMotifs[ajLabel] || 0) + 1;
+          totalAjournes++;
+        }
       });
 
-      let topRiderMotif = "-";
-      let maxRM = 0;
-      for (const [m, c] of Object.entries(rMotifs)) {
-        if (c > maxRM) {
-          maxRM = c;
-          topRiderMotif = m;
+      const getTopMotif = (countsObj) => {
+        let best = "-";
+        let max = 0;
+        for (const [m, c] of Object.entries(countsObj)) {
+          if (c > max) {
+            max = c;
+            best = m;
+          }
         }
-      }
+        return best;
+      };
+
+      const topAjourneMotif = getTopMotif(rAjourneMotifs);
+      const topAnnuleMotif = getTopMotif(rAnnuleMotifs);
+
+      const dbMatch = deliveryByRider.get(normalizeKey(name));
+      const totalColis =
+        dbMatch && Number(dbMatch.totalColis) > 0
+          ? Number(dbMatch.totalColis)
+          : typeof r.totalCount === "number" && r.totalCount > 0
+            ? r.totalCount
+            : null;
+      const ratePct =
+        totalColis && totalColis >= validParcels.length
+          ? ((totalColis - validParcels.length) / totalColis) * 100
+          : null;
+
+      const ajInfo = buildRiderSlaDefenseComment({
+        totalC: totalColis || 0,
+        livC: totalColis ? Math.max(0, totalColis - validParcels.length) : 0,
+        ajourneC: ajournesList.length,
+        annuleC: annulesList.length,
+        retNonRec: dbMatch ? Number(dbMatch.retourNonRecupere) || 0 : 0,
+        parcels: validParcels,
+        focusCat: "ajourne",
+      });
+      const anInfo = buildRiderSlaDefenseComment({
+        totalC: totalColis || 0,
+        livC: totalColis ? Math.max(0, totalColis - validParcels.length) : 0,
+        ajourneC: ajournesList.length,
+        annuleC: annulesList.length,
+        retNonRec: dbMatch ? Number(dbMatch.retourNonRecupere) || 0 : 0,
+        parcels: validParcels,
+        focusCat: "annule",
+      });
+      const allInfo = buildRiderSlaDefenseComment({
+        totalC: totalColis || 0,
+        livC: totalColis ? Math.max(0, totalColis - validParcels.length) : 0,
+        ajourneC: ajournesList.length,
+        annuleC: annulesList.length,
+        retNonRec: dbMatch ? Number(dbMatch.retourNonRecupere) || 0 : 0,
+        parcels: validParcels,
+        focusCat: "all",
+      });
+
+      const rDayInfo = getDayAndFormattedDateFr(r.date || null);
 
       riderStats.push({
         livreur: name,
         tourneeId: r.tourneeId || "N/A",
-        date: r.date || "",
-        count: parcels.length,
-        amount: rAmount,
-        topMotif: topRiderMotif,
-        parcels: parcels,
+        date: r.date ? rDayInfo.dayFull : "",
+        count: validParcels.length,
+        ajournes: ajournesList.length,
+        annules: annulesList.length,
+        ajournesList,
+        annulesList,
+        totalColis,
+        ratePct,
+        topAjourneMotif,
+        topAnnuleMotif,
+        ajourneAnalyse: ajInfo.analyse,
+        ajourneComment: ajInfo.comment,
+        annuleAnalyse: anInfo.analyse,
+        annuleComment: anInfo.comment,
+        summaryDesc: `${allInfo.analyse} | ${allInfo.comment}`,
+        parcels: validParcels,
       });
     });
 
     if (totalParcelsCount === 0) {
-      alert("Tous les colis trouvés sont marqués comme livrés. Aucun colis en échec/annulé/refusé à exporter.");
+      alert("Tous les colis trouvés sont marqués comme livrés. Aucun colis ajourné/annulé à exporter.");
       return { success: false };
     }
 
-    // Top overall motif
-    let topMotif = "Aucun";
-    let maxCount = 0;
-    for (const [m, data] of Object.entries(motifCounts)) {
-      if (data.count > maxCount) {
-        maxCount = data.count;
-        topMotif = m;
+    const aiCommentsMap = await fetchAiRiderSlaComments(
+      riderStats.map((rs) => ({
+        livreur: rs.livreur,
+        total: rs.totalColis || 0,
+        livres: rs.totalColis ? Math.max(0, rs.totalColis - rs.count) : 0,
+        ajournes: rs.ajournes,
+        annules: rs.annules,
+        motifs: (rs.parcels || []).map((x) => ({ statut: x.statut, motif: x.raisonAnnulation || "" })),
+      }))
+    );
+    riderStats.forEach((rs) => {
+      const aiText = aiCommentsMap[rs.livreur] || aiCommentsMap[normalizeKey(rs.livreur)];
+      if (aiText && String(aiText).trim()) {
+        const cleanAi = String(aiText).trim();
+        rs.ajourneComment = cleanAi;
+        rs.annuleComment = cleanAi;
+        rs.summaryDesc = cleanAi;
       }
-    }
-    const topMotifPct = totalParcelsCount > 0 ? ((maxCount / totalParcelsCount) * 100).toFixed(1) : 0;
-    const today = new Date();
-    const dateFormatted = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
-    const dateFile = `${String(today.getDate()).padStart(2, "0")}-${String(today.getMonth() + 1).padStart(2, "0")}-${today.getFullYear()}`;
+    });
+
+    const sortedRepartition = Object.values(repartitionCounts).sort((a, b) => b.count - a.count);
+    const ajournePct = totalParcelsCount > 0 ? ((totalAjournes / totalParcelsCount) * 100).toFixed(1) : "0.0";
+    const annulePct = totalParcelsCount > 0 ? ((totalAnnules / totalParcelsCount) * 100).toFixed(1) : "0.0";
+    const { dayName, dayFull, dateFile } = getDayAndFormattedDateFr();
 
     // A) XlsxPopulate Rich Modern Export
     if (typeof XlsxPopulate !== "undefined") {
@@ -1382,19 +1827,19 @@ document.addEventListener("DOMContentLoaded", async () => {
       wsDash.name("TABLEAU_DE_BORD");
       wsDash.gridLinesVisible(true);
 
-      const dashWidths = { A: 6, B: 34, C: 15, D: 15, E: 20, F: 15, G: 38 };
+      const dashWidths = { A: 6, B: 30, C: 15, D: 18, E: 20, F: 26, G: 48, H: 74 };
       for (const [c, w] of Object.entries(dashWidths)) {
         wsDash.column(c).width(w);
       }
 
       // Row 1: Header Banner
       wsDash.row(1).height(38);
-      wsDash.range("A1:G1").merged(true).value("GOFLEET • TABLEAU DE BORD ANALYTIQUE DES COLIS NON LIVRÉS")
+      wsDash.range("A1:H1").merged(true).value("GOFLEET • TABLEAU DE BORD ANALYTIQUE DES COLIS NON LIVRÉS (AJOURNÉS & ANNULÉS)")
         .style({
           fill: "0F172A",
           fontColor: "FFFFFF",
           bold: true,
-          fontSize: 13.5,
+          fontSize: 13,
           fontFamily: "Segoe UI",
           horizontalAlignment: "center",
           verticalAlignment: "center",
@@ -1402,8 +1847,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       // Row 2: Subtitle
       wsDash.row(2).height(20);
-      wsDash.range("A2:G2").merged(true).value(
-        `📅 Date d'analyse : ${dateFormatted} | 🛵 ${riderNames.length} tournée(s) analysée(s) | 📦 ${totalParcelsCount} colis non livrés répertoriés`
+      wsDash.range("A2:H2").merged(true).value(
+        `📅 Jour d'analyse : ${dayFull} | 🛵 ${riderNames.length} tournée(s) analysée(s) | 📦 ${totalParcelsCount} colis non livrés (${totalAjournes} Ajourné(s) • ${totalAnnules} Annulé(s))`
       ).style({
         fill: "1E293B",
         fontColor: "94A3B8",
@@ -1417,12 +1862,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       // Row 3: Spacer
       wsDash.row(3).height(8);
 
-      // Rows 4-6: KPI Cards
-      wsDash.row(4).height(18);
-      wsDash.row(5).height(18);
-      wsDash.row(6).height(18);
+      // Rows 4-6: KPI Cards (NO CRBT)
+      wsDash.row(4).height(20);
+      wsDash.row(5).height(20);
+      wsDash.row(6).height(20);
 
-      function createCard(c1, c2, title, tFill, tColor, valText, vColor, bColor) {
+      function createCard(c1, c2, title, tFill, tColor, valText, vColor, bColor, fontSz = 14) {
         wsDash.range(`${c1}4:${c2}4`).merged(true).value(title).style({
           fill: tFill,
           fontColor: tColor,
@@ -1441,10 +1886,11 @@ document.addEventListener("DOMContentLoaded", async () => {
           fill: "FFFFFF",
           fontColor: vColor,
           bold: true,
-          fontSize: 16,
+          fontSize: fontSz,
           fontFamily: "Segoe UI",
           horizontalAlignment: "center",
           verticalAlignment: "center",
+          wrapText: true,
           bottomBorder: "thin",
           leftBorder: "thin",
           rightBorder: "thin",
@@ -1453,204 +1899,225 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
       }
 
-      createCard("A", "B", "🔴 TOTAL COLIS NON LIVRÉS", "FFF1F2", "9F1239", `${totalParcelsCount} Colis`, "E11D48", "FECDD3");
-      createCard("C", "D", "💰 VALEUR TOTALE CRBT (DH)", "ECFDF5", "065F46", `${totalCRBT.toFixed(2)} DH`, "059669", "A7F3D0");
-      createCard("E", "E", "🛵 TOURNÉES LIVREURS", "F0FDFA", "115E59", `${riderNames.length} Livreurs`, "0D9488", "99F6E4");
-      createCard("F", "G", "⚠️ PRINCIPAL MOTIF D'ÉCHEC", "EFF6FF", "1E40AF", `${topMotif} (${topMotifPct}%)`, "2563EB", "BFDBFE");
+      createCard("A", "B", "📅 JOUR D'ANALYSE", "F1F5F9", "334155", dayFull, "0F172A", "CBD5E1", 11);
+      createCard("C", "D", "⏸️ TOTAL COLIS AJOURNÉS", "FFFBEB", "92400E", `${totalAjournes} (${ajournePct}%)`, "B45309", "FDE68A", 14);
+      createCard("E", "E", "❌ TOTAL COLIS ANNULÉS", "FFF1F2", "9F1239", `${totalAnnules} (${annulePct}%)`, "E11D48", "FECDD3", 14);
+      createCard("F", "H", "🛵 TOURNÉES & NON LIVRÉS", "F0FDFA", "115E59", `${totalParcelsCount} Colis (${riderNames.length} Livreurs)`, "0D9488", "99F6E4", 13);
 
       // Row 7: Spacer
       wsDash.row(7).height(12);
 
-      // Section 1 Header: Motifs
+      const sectionHeaderStyle = {
+        fontColor: "FFFFFF",
+        bold: true,
+        fontSize: 10,
+        fontFamily: "Segoe UI",
+        horizontalAlignment: "left",
+        verticalAlignment: "center",
+        indent: 1,
+      };
+      const tableColHeaderStyle = {
+        fill: "1E293B",
+        fontColor: "FFFFFF",
+        bold: true,
+        fontSize: 9,
+        fontFamily: "Segoe UI",
+        horizontalAlignment: "center",
+        verticalAlignment: "center",
+        wrapText: true,
+        border: "thin",
+        borderColor: "0F172A",
+      };
+
       let curRow = 8;
+      // Section 1: Single Unified Répartition Table (Statuts Ajournés & Motifs Annulés)
       wsDash.row(curRow).height(24);
-      wsDash.range(`A${curRow}:G${curRow}`).merged(true).value("🔍 RÉPARTITION DES ÉCHECS PAR MOTIF / CAUSE RACINE")
-        .style({
-          fill: "334155",
-          fontColor: "FFFFFF",
-          bold: true,
-          fontSize: 10,
-          fontFamily: "Segoe UI",
-          horizontalAlignment: "left",
-          verticalAlignment: "center",
-          indent: 1,
-        });
+      wsDash.range(`A${curRow}:H${curRow}`).merged(true).value("📊 RÉPARTITION GLOBALE DES STATUTS & MOTIFS (AJOURNÉS & ANNULÉS)")
+        .style({ ...sectionHeaderStyle, fill: "1E293B" });
 
       curRow++;
       wsDash.row(curRow).height(24);
-      const motifHeaders = ["N°", "Motif / Raison d'Échec", "Nb Colis", "% Volume", "Montant CRBT", "% Valeur", "Action Recommandée (Dispatch / Caisse)"];
-      const motifCols = ["A", "B", "C", "D", "E", "F", "G"];
-      motifHeaders.forEach((h, idx) => {
-        wsDash.cell(`${motifCols[idx]}${curRow}`).value(h).style({
-          fill: "1E293B",
-          fontColor: "FFFFFF",
-          bold: true,
-          fontSize: 9,
-          fontFamily: "Segoe UI",
-          horizontalAlignment: "center",
-          verticalAlignment: "center",
-          border: "thin",
-          borderColor: "0F172A",
-        });
-      });
+      wsDash.cell(`A${curRow}`).value("N°").style(tableColHeaderStyle);
+      wsDash.range(`B${curRow}:C${curRow}`).merged(true).value("Statut / Motif").style(tableColHeaderStyle);
+      wsDash.cell(`D${curRow}`).value("Nb Colis").style(tableColHeaderStyle);
+      wsDash.cell(`E${curRow}`).value("% Total Non Livrés").style(tableColHeaderStyle);
+      wsDash.cell(`F${curRow}`).value("Catégorie").style(tableColHeaderStyle);
+      wsDash.range(`G${curRow}:H${curRow}`).merged(true).value("Action Recommandée (Dispatch / Caisse)").style(tableColHeaderStyle);
 
-      const sortedMotifs = Object.entries(motifCounts).sort((a, b) => b[1].count - a[1].count);
-      const startMotifRow = curRow + 1;
-
-      sortedMotifs.forEach(([motif, data], idx) => {
+      const repStartR = curRow + 1;
+      sortedRepartition.forEach((item, idx) => {
         curRow++;
-        wsDash.row(curRow).height(21);
+        wsDash.row(curRow).height(23);
         const bg = idx % 2 === 0 ? "FFFFFF" : "F8FAFC";
-        const pctVol = totalParcelsCount > 0 ? (data.count / totalParcelsCount) : 0;
-        const pctVal = totalCRBT > 0 ? (data.amount / totalCRBT) : 0;
+        const pctAll = totalParcelsCount > 0 ? item.count / totalParcelsCount : 0;
+        const isAnn = item.cat === "annule";
 
-        let action = "⚠️ Vérifier avec livreur";
-        const lm = motif.toLowerCase();
-        if (lm.includes("injoignable") || lm.includes("répond")) action = "📞 Relance Téléphone / SMS client";
+        let action = isAnn ? "📦 Retour stock Hub & contrôle caisse" : "🔄 Reprogrammer livraison / Relancer client";
+        const lm = item.label.toLowerCase();
+        if (lm.includes("injoignable") || lm.includes("répond")) action = "📞 Relance Téléphone / SMS client & reprogrammation";
         else if (lm.includes("absent") || lm.includes("pas chez")) action = "🔄 Reprogrammer livraison J+1";
         else if (lm.includes("refus") || lm.includes("prix") || lm.includes("cher")) action = "📦 Retour immédiat au Hub (Contrôle stock)";
         else if (lm.includes("report") || lm.includes("demande") || lm.includes("date")) action = "📅 Reprogrammer à la date convenue";
-        else if (lm.includes("adresse") || lm.includes("incompl") || lm.includes("trouv")) action = "📍 Valider localisation avec client";
+        else if (lm.includes("adresse") || lm.includes("incompl") || lm.includes("trouv")) action = "📍 Valider localisation GPS avec client";
         else if (lm.includes("annul")) action = "❌ Annulation définitive (Retour stock Hub)";
 
         wsDash.cell(`A${curRow}`).value(idx + 1).style({ fill: bg, fontColor: "64748B", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
-        wsDash.cell(`B${curRow}`).value(motif).style({ fill: bg, fontColor: "0F172A", bold: true, horizontalAlignment: "left", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
-        wsDash.cell(`C${curRow}`).value(data.count).style({ fill: bg, fontColor: "E11D48", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "#,##0" });
-        wsDash.cell(`D${curRow}`).value(pctVol).style({ fill: bg, fontColor: "2563EB", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "0.0%" });
-        wsDash.cell(`E${curRow}`).value(data.amount).style({ fill: bg, fontColor: "059669", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: '#,##0.00 "DH"' });
-        wsDash.cell(`F${curRow}`).value(pctVal).style({ fill: bg, fontColor: "64748B", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "0.0%" });
-        wsDash.cell(`G${curRow}`).value(action).style({ fill: bg, fontColor: "334155", italic: true, horizontalAlignment: "left", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
+        wsDash.range(`B${curRow}:C${curRow}`).merged(true).value(item.label).style({ fill: bg, fontColor: "0F172A", bold: true, horizontalAlignment: "left", verticalAlignment: "center", wrapText: true, border: "thin", borderColor: "E2E8F0" });
+        wsDash.cell(`D${curRow}`).value(item.count).style({ fill: bg, fontColor: isAnn ? "E11D48" : "B45309", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "#,##0" });
+        wsDash.cell(`E${curRow}`).value(pctAll).style({ fill: bg, fontColor: "2563EB", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "0.0%" });
+        wsDash.cell(`F${curRow}`).value(isAnn ? "❌ Annulé / Refusé" : "⏸️ Ajourné").style({ fill: isAnn ? "FFF1F2" : "FFFBEB", fontColor: isAnn ? "9F1239" : "92400E", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
+        wsDash.range(`G${curRow}:H${curRow}`).merged(true).value(action).style({ fill: bg, fontColor: "334155", italic: true, horizontalAlignment: "left", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
       });
 
-      // Totals Motifs Row
       curRow++;
       wsDash.row(curRow).height(24);
-      wsDash.range(`A${curRow}:B${curRow}`).merged(true).value("TOTAL MOTIFS").style({ fill: "0F172A", fontColor: "FFFFFF", bold: true, fontSize: 9.5, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A" });
-      wsDash.cell(`C${curRow}`).formula(`SUM(C${startMotifRow}:C${curRow - 1})`).style({ fill: "0F172A", fontColor: "F87171", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: "#,##0" });
-      wsDash.cell(`D${curRow}`).value(1).style({ fill: "0F172A", fontColor: "60A5FA", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: "0.0%" });
-      wsDash.cell(`E${curRow}`).formula(`SUM(E${startMotifRow}:E${curRow - 1})`).style({ fill: "0F172A", fontColor: "34D399", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: '#,##0.00 "DH"' });
-      wsDash.cell(`F${curRow}`).value(1).style({ fill: "0F172A", fontColor: "CBD5E1", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: "0.0%" });
-      wsDash.cell(`G${curRow}`).value("-").style({ fill: "0F172A", fontColor: "94A3B8", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A" });
-
-      // Section 2: Synthèse par Livreur
+      wsDash.range(`A${curRow}:C${curRow}`).merged(true).value("TOTAL GÉNÉRAL RÉPARTITION").style({ fill: "0F172A", fontColor: "FFFFFF", bold: true, fontSize: 9.5, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A" });
+      wsDash.cell(`D${curRow}`).formula(`SUM(D${repStartR}:D${curRow - 1})`).style({ fill: "0F172A", fontColor: "34D399", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: "#,##0" });
+      wsDash.cell(`E${curRow}`).value(1).style({ fill: "0F172A", fontColor: "60A5FA", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: "0.0%" });
+      wsDash.range(`F${curRow}:H${curRow}`).merged(true).value(`${totalAjournes} Ajourné(s) • ${totalAnnules} Annulé(s)`).style({ fill: "0F172A", fontColor: "CBD5E1", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A" });
       curRow += 2;
-      wsDash.row(curRow).height(24);
-      wsDash.range(`A${curRow}:G${curRow}`).merged(true).value("🛵 SYNTHÈSE & RÉCAPITULATIF PAR LIVREUR")
-        .style({ fill: "334155", fontColor: "FFFFFF", bold: true, fontSize: 10, fontFamily: "Segoe UI", horizontalAlignment: "left", verticalAlignment: "center", indent: 1 });
 
-      curRow++;
-      wsDash.row(curRow).height(24);
-      const riderHeaders = ["N°", "Nom Livreur", "N° Tournée", "Colis Échoués", "Valeur CRBT", "Motif Dominant", "Statut Tournée"];
-      riderHeaders.forEach((h, idx) => {
-        wsDash.cell(`${motifCols[idx]}${curRow}`).value(h).style({ fill: "1E293B", fontColor: "FFFFFF", bold: true, fontSize: 9, fontFamily: "Segoe UI", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A" });
-      });
+      // Helper to render the 2 separate Rider Summary Tables (Analyse + Commentaire)
+      function renderRiderTable(title, headerFill, rowsList, countField, motifField, analyseField, commentField, countColTitle, isAnnuleTbl) {
+        wsDash.row(curRow).height(24);
+        wsDash.range(`A${curRow}:H${curRow}`).merged(true).value(title).style({ ...sectionHeaderStyle, fill: headerFill });
 
-      const startRiderRow = curRow + 1;
-      riderStats.forEach((r, idx) => {
         curRow++;
-        wsDash.row(curRow).height(21);
-        const bg = idx % 2 === 0 ? "FFFFFF" : "F8FAFC";
-        const statusLabel = r.count > 0 ? `⚠️ ${r.count} non livrés` : "✅ 100% Livré";
+        wsDash.row(curRow).height(26);
+        const cols = ["A", "B", "C", "D", "E", "F", "G", "H"];
+        const hdrs = ["N°", "Nom Livreur", "N° Tournée", "Taux Livraison", countColTitle, isAnnuleTbl ? "Motif Dominant" : "Statut Dominant", "Analyse des Écarts", "Commentaire (Défense SLA 80%)"];
+        hdrs.forEach((h, idx) => wsDash.cell(`${cols[idx]}${curRow}`).value(h).style(tableColHeaderStyle));
 
-        wsDash.cell(`A${curRow}`).value(idx + 1).style({ fill: bg, fontColor: "64748B", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
-        wsDash.cell(`B${curRow}`).value(r.livreur).style({ fill: bg, fontColor: "0F172A", bold: true, horizontalAlignment: "left", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
-        wsDash.cell(`C${curRow}`).value(r.tourneeId).style({ fill: bg, fontColor: "334155", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
-        wsDash.cell(`D${curRow}`).value(r.count).style({ fill: bg, fontColor: "E11D48", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "#,##0" });
-        wsDash.cell(`E${curRow}`).value(r.amount).style({ fill: bg, fontColor: "059669", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: '#,##0.00 "DH"' });
-        wsDash.cell(`F${curRow}`).value(r.topMotif).style({ fill: bg, fontColor: "2563EB", italic: true, horizontalAlignment: "left", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
-        wsDash.cell(`G${curRow}`).value(statusLabel).style({ fill: bg, fontColor: "9F1239", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
-      });
+        if (rowsList.length === 0) {
+          curRow++;
+          wsDash.row(curRow).height(22);
+          wsDash.range(`A${curRow}:H${curRow}`).merged(true).value(`✅ Aucun livreur n'a de colis ${isAnnuleTbl ? "annulé" : "ajourné"}.`)
+            .style({ fill: "F0FDF4", fontColor: "059669", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "A7F3D0" });
+          curRow += 2;
+          return;
+        }
 
-      // Rider Total
-      curRow++;
-      wsDash.row(curRow).height(24);
-      wsDash.range(`A${curRow}:C${curRow}`).merged(true).value("TOTAL GÉNÉRAL LIVREURS").style({ fill: "0F172A", fontColor: "FFFFFF", bold: true, fontSize: 9.5, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A" });
-      wsDash.cell(`D${curRow}`).formula(`SUM(D${startRiderRow}:D${curRow - 1})`).style({ fill: "0F172A", fontColor: "F87171", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: "#,##0" });
-      wsDash.cell(`E${curRow}`).formula(`SUM(E${startRiderRow}:E${curRow - 1})`).style({ fill: "0F172A", fontColor: "34D399", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: '#,##0.00 "DH"' });
-      wsDash.range(`F${curRow}:G${curRow}`).merged(true).value("-").style({ fill: "0F172A", fontColor: "94A3B8", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A" });
+        const startR = curRow + 1;
+        rowsList.forEach((r, idx) => {
+          curRow++;
+          const aStr = String(r[analyseField] || "");
+          const cStr = String(r[commentField] || "");
+          const neededLines = Math.max(Math.ceil(aStr.length / 42), Math.ceil(cStr.length / 66));
+          wsDash.row(curRow).height(Math.max(34, neededLines * 15 + 10));
+          const bg = idx % 2 === 0 ? "FFFFFF" : "F8FAFC";
+          const rateLabel = r.ratePct !== null ? `${r.ratePct.toFixed(1)}% (${Math.max(0, r.totalColis - r.count)}/${r.totalColis})` : "N/A";
+          const rateColor = r.ratePct === null ? "64748B" : r.ratePct >= 90 ? "059669" : r.ratePct >= 80 ? "D97706" : "E11D48";
+          const descColor = r.ratePct !== null && r.ratePct >= 90 ? "065F46" : r.ratePct !== null && r.ratePct >= 80 ? "92400E" : "9F1239";
 
-      // === SHEETS 2..N: INDIVIDUAL RIDER SHEETS ===
+          wsDash.cell(`A${curRow}`).value(idx + 1).style({ fill: bg, fontColor: "64748B", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
+          wsDash.cell(`B${curRow}`).value(r.livreur).style({ fill: bg, fontColor: "0F172A", bold: true, horizontalAlignment: "left", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
+          wsDash.cell(`C${curRow}`).value(r.tourneeId).style({ fill: bg, fontColor: "334155", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
+          wsDash.cell(`D${curRow}`).value(rateLabel).style({ fill: bg, fontColor: rateColor, bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
+          wsDash.cell(`E${curRow}`).value(r[countField]).style({ fill: isAnnuleTbl ? "FFF1F2" : "FFFBEB", fontColor: isAnnuleTbl ? "E11D48" : "B45309", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: "#,##0" });
+          wsDash.cell(`F${curRow}`).value(r[motifField]).style({ fill: bg, fontColor: "2563EB", italic: true, horizontalAlignment: "left", verticalAlignment: "center", wrapText: true, border: "thin", borderColor: "E2E8F0" });
+          wsDash.cell(`G${curRow}`).value(aStr).style({ fill: bg, fontColor: "334155", fontSize: 9, horizontalAlignment: "left", verticalAlignment: "center", wrapText: true, border: "thin", borderColor: "E2E8F0" });
+          wsDash.cell(`H${curRow}`).value(cStr).style({ fill: bg, fontColor: descColor, fontSize: 9, bold: r.ratePct !== null && r.ratePct < 80, horizontalAlignment: "left", verticalAlignment: "center", wrapText: true, border: "thin", borderColor: "E2E8F0" });
+        });
+
+        curRow++;
+        wsDash.row(curRow).height(25);
+        wsDash.range(`A${curRow}:D${curRow}`).merged(true).value(isAnnuleTbl ? "TOTAL COLIS ANNULÉS" : "TOTAL COLIS AJOURNÉS")
+          .style({ fill: "0F172A", fontColor: "FFFFFF", bold: true, fontSize: 9.5, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A" });
+        wsDash.cell(`E${curRow}`).formula(`SUM(E${startR}:E${curRow - 1})`)
+          .style({ fill: "0F172A", fontColor: isAnnuleTbl ? "F87171" : "FBBF24", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: "#,##0" });
+        wsDash.range(`F${curRow}:H${curRow}`).merged(true).value(`Synthèse du ${dayFull}`)
+          .style({ fill: "0F172A", fontColor: "94A3B8", italic: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A" });
+        curRow += 2;
+      }
+
+      const ajourneRiders = riderStats.filter((r) => r.ajournes > 0).sort((a, b) => b.ajournes - a.ajournes);
+      const annuleRiders = riderStats.filter((r) => r.annules > 0).sort((a, b) => b.annules - a.annules);
+
+      // Section 2A & 2B: Two separate Rider Summary Tables
+      renderRiderTable("⏸️ SYNTHÈSE PAR LIVREUR — COLIS AJOURNÉS", "B45309", ajourneRiders, "ajournes", "topAjourneMotif", "ajourneAnalyse", "ajourneComment", "Colis Ajournés", false);
+      renderRiderTable("❌ SYNTHÈSE PAR LIVREUR — COLIS ANNULÉS / REFUSÉS", "9F1239", annuleRiders, "annules", "topAnnuleMotif", "annuleAnalyse", "annuleComment", "Colis Annulés", true);
+
+      // === SHEETS 2..N: INDIVIDUAL RIDER SHEETS (Ajournés & Annulés separated, 6 clean columns) ===
       const existingSheets = new Set(["tableau_de_bord"]);
 
-      riderNames.forEach((riderName) => {
+      riderNames.forEach((riderName, rIdx) => {
         const rData = map[riderName] || {};
-        const parcels = rData.parcels || [];
-
-        let cleanName = (riderName || "Livreur").replace(/[\\/?*[\]:]/g, "_").trim();
-        if (cleanName.length > 28) cleanName = cleanName.substring(0, 28).trim();
-        let safeName = cleanName || "Livreur";
-        let c = 1;
-        while (existingSheets.has(safeName.toLowerCase())) {
-          safeName = `${cleanName.substring(0, 25)}_${c++}`;
-        }
-        existingSheets.add(safeName.toLowerCase());
-
-        const wsRider = wb.addSheet(safeName);
+        const rStat = riderStats[rIdx] || {};
+        const safeSheetName = sanitizeExcelSheetName(riderName, existingSheets);
+        const wsRider = wb.addSheet(safeSheetName);
         wsRider.gridLinesVisible(true);
 
-        const rCols = { A: 6, B: 24, C: 16, D: 32, E: 18, F: 26, G: 18, H: 40, I: 15, J: 14 };
+        const rCols = { A: 6, B: 24, C: 24, D: 58, E: 15, F: 24 };
         for (const [col, w] of Object.entries(rCols)) {
           wsRider.column(col).width(w);
         }
 
-        let rAmount = 0;
-        parcels.forEach((p) => {
-          rAmount += parseFloat(String(p.prix || "").replace(/[^0-9.,]/g, "").replace(",", ".")) || 0;
-        });
+        const riderDisplayDate = rStat.date || dayFull;
 
         // Banner
         wsRider.row(1).height(34);
-        wsRider.range("A1:J1").merged(true).value(`TOURNÉE LIVREUR : ${riderName.toUpperCase()}`)
+        wsRider.range("A1:F1").merged(true).value(`TOURNÉE LIVREUR : ${riderName.toUpperCase()}`)
           .style({ fill: "0D9488", fontColor: "FFFFFF", bold: true, fontSize: 13, fontFamily: "Segoe UI", horizontalAlignment: "center", verticalAlignment: "center" });
 
         wsRider.row(2).height(20);
-        wsRider.range("A2:J2").merged(true).value(
-          `N° Tournée : ${rData.tourneeId || "N/A"} | Date : ${rData.date || ""} | Colis Non Livrés : ${parcels.length} | Montant CRBT : ${rAmount.toFixed(2)} DH`
+        wsRider.range("A2:F2").merged(true).value(
+          `N° Tournée : ${rData.tourneeId || "N/A"} | Date : ${riderDisplayDate} | Ajournés : ${rStat.ajournes} | Annulés : ${rStat.annules} | Total Non Livrés : ${rStat.count}`
         ).style({ fill: "1E293B", fontColor: "94A3B8", italic: true, fontSize: 9.5, fontFamily: "Segoe UI", horizontalAlignment: "center", verticalAlignment: "center" });
 
         wsRider.row(3).height(8);
 
-        // Table headers
-        wsRider.row(4).height(26);
-        const rHeaders = ["N°", "Code Colis / Tracking", "Statut Colis", "Motif / Raison d'Échec", "Montant CRBT", "Client Destinataire", "Téléphone", "Adresse de Livraison", "N° Tournée", "Date"];
-        const rColKeys = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
-        rHeaders.forEach((h, i) => {
-          wsRider.cell(`${rColKeys[i]}4`).value(h).style({ fill: "1E293B", fontColor: "FFFFFF", bold: true, fontSize: 9.5, fontFamily: "Segoe UI", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A" });
-        });
+        let rCur = 4;
+        const rHeaders = ["N°", "Code Colis / Tracking", "Statut Colis", "Motif / Raison", "N° Tournée", "Date / Jour"];
+        const rColKeys = ["A", "B", "C", "D", "E", "F"];
 
-        if (parcels.length > 0) {
-          parcels.forEach((p, idx) => {
-            const r = 5 + idx;
-            wsRider.row(r).height(21);
-            const bg = idx % 2 === 0 ? "FFFFFF" : "F8FAFC";
-            const priceVal = parseFloat(String(p.prix || "").replace(/[^0-9.,]/g, "").replace(",", ".")) || 0;
-            const isRefused = (p.statut || "").toLowerCase().includes("refus");
+        function renderRiderParcelBlock(blockTitle, blockFill, list, isAnnuleBlk) {
+          wsRider.row(rCur).height(24);
+          wsRider.range(`A${rCur}:F${rCur}`).merged(true).value(blockTitle)
+            .style({ fill: blockFill, fontColor: "FFFFFF", bold: true, fontSize: 10, fontFamily: "Segoe UI", horizontalAlignment: "left", verticalAlignment: "center", indent: 1 });
 
-            wsRider.cell(`A${r}`).value(idx + 1).style({ fill: bg, fontColor: "64748B", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
-            wsRider.cell(`B${r}`).value(p.colis || "-").style({ fill: bg, fontColor: "0F172A", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
-            wsRider.cell(`C${r}`).value(p.statut || "Non livré").style({ fill: bg, fontColor: isRefused ? "E11D48" : "2563EB", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
-            wsRider.cell(`D${r}`).value(p.raisonAnnulation || "-").style({ fill: bg, fontColor: "334155", horizontalAlignment: "left", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
-            wsRider.cell(`E${r}`).value(priceVal).style({ fill: bg, fontColor: "059669", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0", numberFormat: '#,##0.00 "DH"' });
-            wsRider.cell(`F${r}`).value(p.client || "-").style({ fill: bg, fontColor: "1E293B", horizontalAlignment: "left", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
-            wsRider.cell(`G${r}`).value(p.telephone || "-").style({ fill: bg, fontColor: "0284C7", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
-            wsRider.cell(`H${r}`).value(p.adresse || "-").style({ fill: bg, fontColor: "475569", horizontalAlignment: "left", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
-            wsRider.cell(`I${r}`).value(p.tourneeId || rData.tourneeId || "-").style({ fill: bg, fontColor: "64748B", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
-            wsRider.cell(`J${r}`).value(p.date || rData.date || "").style({ fill: bg, fontColor: "64748B", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
+          rCur++;
+          wsRider.row(rCur).height(25);
+          rHeaders.forEach((h, i) => {
+            wsRider.cell(`${rColKeys[i]}${rCur}`).value(h).style({ fill: "1E293B", fontColor: "FFFFFF", bold: true, fontSize: 9.5, fontFamily: "Segoe UI", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A" });
           });
 
-          const totRow = 5 + parcels.length;
-          wsRider.row(totRow).height(25);
-          wsRider.range(`A${totRow}:D${totRow}`).merged(true).value(`TOTAL : ${parcels.length} COLIS NON LIVRÉS`)
-            .style({ fill: "0F172A", fontColor: "FFFFFF", bold: true, fontSize: 9.5, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A" });
-          wsRider.cell(`E${totRow}`).formula(`SUM(E5:E${totRow - 1})`)
-            .style({ fill: "0F172A", fontColor: "34D399", bold: true, fontSize: 10, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A", numberFormat: '#,##0.00 "DH"' });
-          wsRider.range(`F${totRow}:J${totRow}`).merged(true).value("-")
-            .style({ fill: "0F172A", fontColor: "94A3B8", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A" });
-        } else {
-          wsRider.row(5).height(22);
-          wsRider.range("A5:J5").merged(true).value("✅ Tous les colis de cette tournée ont été livrés avec succès (0 échec).")
-            .style({ fill: "F0FDF4", fontColor: "059669", bold: true, fontSize: 10, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "A7F3D0" });
+          if (list.length > 0) {
+            list.forEach((p, idx) => {
+              rCur++;
+              const motifVal = isAnnuleBlk ? (p._resolvedMotif || p.raisonAnnulation || "-") : (p.raisonAnnulation || "-");
+              wsRider.row(rCur).height(motifVal.length > 52 ? 32 : 22);
+              const bg = idx % 2 === 0 ? "FFFFFF" : "F8FAFC";
+              const pDay = p.date ? getDayAndFormattedDateFr(p.date).dayFull : riderDisplayDate;
+
+              wsRider.cell(`A${rCur}`).value(idx + 1).style({ fill: bg, fontColor: "64748B", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
+              wsRider.cell(`B${rCur}`).value(p.colis || "-").style({ fill: bg, fontColor: "0F172A", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
+              wsRider.cell(`C${rCur}`).value(p.statut || (isAnnuleBlk ? "Annulé" : "Ajourné")).style({ fill: bg, fontColor: isAnnuleBlk ? "E11D48" : "B45309", bold: true, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
+              wsRider.cell(`D${rCur}`).value(motifVal).style({ fill: bg, fontColor: motifVal === "-" ? "94A3B8" : "334155", horizontalAlignment: motifVal === "-" ? "center" : "left", verticalAlignment: "center", wrapText: true, border: "thin", borderColor: "E2E8F0" });
+              wsRider.cell(`E${rCur}`).value(p.tourneeId || rData.tourneeId || "-").style({ fill: bg, fontColor: "64748B", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
+              wsRider.cell(`F${rCur}`).value(pDay).style({ fill: bg, fontColor: "64748B", horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "E2E8F0" });
+            });
+
+            rCur++;
+            wsRider.row(rCur).height(24);
+            wsRider.range(`A${rCur}:F${rCur}`).merged(true).value(
+              `SOUS-TOTAL ${isAnnuleBlk ? "ANNULÉS / REFUSÉS" : "AJOURNÉS"} : ${list.length} COLIS`
+            ).style({ fill: "0F172A", fontColor: isAnnuleBlk ? "F87171" : "FBBF24", bold: true, fontSize: 9.5, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "0F172A" });
+          } else {
+            rCur++;
+            wsRider.row(rCur).height(22);
+            wsRider.range(`A${rCur}:F${rCur}`).merged(true).value(`✅ Aucun colis ${isAnnuleBlk ? "annulé / refusé" : "ajourné"} pour ce livreur.`)
+              .style({ fill: "F0FDF4", fontColor: "059669", bold: true, fontSize: 10, horizontalAlignment: "center", verticalAlignment: "center", border: "thin", borderColor: "A7F3D0" });
+          }
+          rCur += 2;
         }
+
+        renderRiderParcelBlock(`⏸️ COLIS AJOURNÉS (${rStat.ajournes})`, "B45309", rStat.ajournesList, false);
+        renderRiderParcelBlock(`❌ COLIS ANNULÉS / REFUSÉS (${rStat.annules})`, "9F1239", rStat.annulesList, true);
+
+        // Rider Diagnostic Footer
+        wsRider.row(rCur).height(28);
+        wsRider.range(`A${rCur}:F${rCur}`).merged(true).value(`📊 Synthèse Livreur : ${rStat.summaryDesc}`)
+          .style({ fill: "F1F5F9", fontColor: "0F172A", bold: true, fontSize: 9.5, horizontalAlignment: "center", verticalAlignment: "center", wrapText: true, border: "thin", borderColor: "CBD5E1" });
       });
 
       const blob = await wb.outputAsync("blob");
@@ -1658,8 +2125,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       const a = document.createElement("a");
       a.href = url;
       const filename = riderNames.length === 1
-        ? `COLIS_NON_LIVRES_${riderNames[0].replace(/\s+/g, "_")}_${dateFile}.xlsx`
-        : `COLIS_NON_LIVRES_${riderNames.length}_LIVREURS_${dateFile}.xlsx`;
+        ? `COLIS_NON_LIVRES_${riderNames[0].replace(/\s+/g, "_")}_${dayName.toUpperCase()}_${dateFile}.xlsx`
+        : `COLIS_NON_LIVRES_${riderNames.length}_LIVREURS_${dayName.toUpperCase()}_${dateFile}.xlsx`;
 
       a.download = filename;
       document.body.appendChild(a);
@@ -1668,55 +2135,74 @@ document.addEventListener("DOMContentLoaded", async () => {
         a.remove();
         URL.revokeObjectURL(url);
       }, 150);
-      return { success: true, count: totalParcelsCount, filename, totalCRBT, totalRiders: riderNames.length };
+      return { success: true, count: totalParcelsCount, ajournes: totalAjournes, annules: totalAnnules, filename, totalRiders: riderNames.length };
     } else {
-      // B) SheetJS Fallback
+      // B) SheetJS Fallback (Ajourné vs Annulé separated, NO CRBT)
       const wb = XLSX.utils.book_new();
       const existingSheets = new Set();
 
       const summaryRows = [];
-      sortedMotifs.forEach(([m, d]) => {
+      sortedRepartition.forEach((item) => {
         summaryRows.push({
-          "Catégorie": "Motif d'Échec",
-          "Libellé": m,
-          "Nb Colis": d.count,
-          "% Volume": `${((d.count / totalParcelsCount) * 100).toFixed(1)}%`,
-          "Valeur CRBT": `${d.amount.toFixed(2)} DH`,
+          "Date / Jour": dayFull,
+          "Type": item.cat === "annule" ? "Motif Annulé" : "Statut Ajourné",
+          "Libellé": item.label,
+          "Nb Colis": item.count,
+          "% Total": `${totalParcelsCount > 0 ? ((item.count / totalParcelsCount) * 100).toFixed(1) : "0.0"}%`,
+          "Analyse des Écarts": "-",
+          "Commentaire (Défense SLA 80%)": "-",
         });
       });
-      riderStats.forEach((r) => {
+      riderStats.filter((r) => r.ajournes > 0).forEach((r) => {
         summaryRows.push({
-          "Catégorie": "Livreur",
+          "Date / Jour": r.date || dayFull,
+          "Type": "Livreur (Ajournés)",
           "Libellé": `${r.livreur} (Tournée ${r.tourneeId})`,
-          "Nb Colis": r.count,
-          "% Volume": `${((r.count / totalParcelsCount) * 100).toFixed(1)}%`,
-          "Valeur CRBT": `${r.amount.toFixed(2)} DH`,
+          "Nb Colis": r.ajournes,
+          "% Total": r.ratePct !== null ? `${r.ratePct.toFixed(1)}%` : "-",
+          "Analyse des Écarts": r.ajourneAnalyse,
+          "Commentaire (Défense SLA 80%)": r.ajourneComment,
+        });
+      });
+      riderStats.filter((r) => r.annules > 0).forEach((r) => {
+        summaryRows.push({
+          "Date / Jour": r.date || dayFull,
+          "Type": "Livreur (Annulés)",
+          "Libellé": `${r.livreur} (Tournée ${r.tourneeId})`,
+          "Nb Colis": r.annules,
+          "% Total": r.ratePct !== null ? `${r.ratePct.toFixed(1)}%` : "-",
+          "Analyse des Écarts": r.annuleAnalyse,
+          "Commentaire (Défense SLA 80%)": r.annuleComment,
         });
       });
 
       const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
-      wsSummary["!cols"] = [{ wch: 18 }, { wch: 36 }, { wch: 12 }, { wch: 14 }, { wch: 20 }];
+      wsSummary["!cols"] = [{ wch: 22 }, { wch: 20 }, { wch: 36 }, { wch: 12 }, { wch: 14 }, { wch: 52 }];
       XLSX.utils.book_append_sheet(wb, wsSummary, "TABLEAU_DE_BORD");
       existingSheets.add("tableau_de_bord");
 
-      riderNames.forEach((riderName) => {
+      riderNames.forEach((riderName, rIdx) => {
         const rData = map[riderName] || {};
-        const parcels = rData.parcels || [];
-        const sheetData = parcels.map((item, idx) => ({
+        const rStat = riderStats[rIdx] || {};
+        const combined = [
+          ...(rStat.ajournesList || []).map((p) => ({ ...p, _catLabel: "AJOURNÉ" })),
+          ...(rStat.annulesList || []).map((p) => ({ ...p, _catLabel: "ANNULÉ" })),
+        ];
+        const sheetData = combined.map((item, idx) => ({
           "N°": idx + 1,
+          "Catégorie": item._catLabel,
           "Colis": item.colis || "",
-          "Statut": item.statut || "Non livré",
-          "Motif / Raison": item.raisonAnnulation || "-",
-          "Montant CRBT": item.prix || "-",
+          "Statut": item.statut || item._catLabel,
+          "Motif / Raison": item._resolvedMotif || item.raisonAnnulation || "-",
           "Destinataire": item.client || "-",
           "Téléphone": item.telephone || "-",
           "Adresse": item.adresse || "-",
           "N° Tournée": item.tourneeId || rData.tourneeId || "-",
-          "Date": item.date || rData.date || "",
+          "Date / Jour": item.date ? getDayAndFormattedDateFr(item.date).dayFull : dayFull,
           "Livreur": riderName,
         }));
         const ws = XLSX.utils.json_to_sheet(sheetData);
-        ws["!cols"] = [{ wch: 6 }, { wch: 22 }, { wch: 16 }, { wch: 30 }, { wch: 16 }, { wch: 26 }, { wch: 18 }, { wch: 38 }, { wch: 14 }, { wch: 14 }, { wch: 24 }];
+        ws["!cols"] = [{ wch: 6 }, { wch: 14 }, { wch: 22 }, { wch: 16 }, { wch: 32 }, { wch: 26 }, { wch: 18 }, { wch: 38 }, { wch: 14 }, { wch: 22 }, { wch: 24 }];
 
         const safeSheetName = sanitizeExcelSheetName(riderName, existingSheets);
         XLSX.utils.book_append_sheet(wb, ws, safeSheetName);
@@ -1728,8 +2214,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       const a = document.createElement("a");
       a.href = url;
       const filename = riderNames.length === 1
-        ? `COLIS_NON_LIVRES_${riderNames[0].replace(/\s+/g, "_")}_${dateFile}.xlsx`
-        : `COLIS_NON_LIVRES_${riderNames.length}_LIVREURS_${dateFile}.xlsx`;
+        ? `COLIS_NON_LIVRES_${riderNames[0].replace(/\s+/g, "_")}_${dayName.toUpperCase()}_${dateFile}.xlsx`
+        : `COLIS_NON_LIVRES_${riderNames.length}_LIVREURS_${dayName.toUpperCase()}_${dateFile}.xlsx`;
 
       a.download = filename;
       document.body.appendChild(a);
@@ -1738,7 +2224,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         a.remove();
         URL.revokeObjectURL(url);
       }, 150);
-      return { success: true, count: totalParcelsCount, filename, totalCRBT, totalRiders: riderNames.length };
+      return { success: true, count: totalParcelsCount, ajournes: totalAjournes, annules: totalAnnules, filename, totalRiders: riderNames.length };
     }
   }
 
@@ -1769,7 +2255,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (clearNonDeliveredBtn) {
     clearNonDeliveredBtn.addEventListener("click", async () => {
       if (confirm("Voulez-vous réinitialiser tous les colis non livrés mémorisés pour tous les livreurs ?")) {
-        await chrome.storage.local.remove("gofleet_non_delivered_by_rider");
+        await chrome.storage.local.remove(["gofleet_non_delivered_by_rider", "gofleet_non_delivered_history"]);
         updateNonDeliveredBadge();
         alert("Mémoire des colis non livrés réinitialisée.");
       }
@@ -1793,6 +2279,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         // 1. Try to collect live data depending on active tab
         const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
         const activeUrl = (activeTab?.url || "").toLowerCase();
+        let caissierResp = null;
 
         if (activeUrl.includes("/caissier/caissier") && !activeUrl.includes("traitementlivreurexcute")) {
           const isSingleEncaissement = activeUrl.includes("tourneeencaisement");
@@ -1809,14 +2296,13 @@ document.addEventListener("DOMContentLoaded", async () => {
               activeTab?.url
             );
             if (response?.status === "ok" && response.data) {
+              caissierResp = response;
               console.log("Données de tous les livreurs collectées depuis Caissier:", response.data);
             } else if (response?.status === "error") {
               console.warn("Avertissement renvoyé par Caissier:", response.message);
             }
           } catch (e) {
-            console.warn("Could not query Caissier page for riders:", e);
-            alert(e.message || "Erreur lors de l'extraction des données de la page Caissier.");
-            return;
+            console.warn("Could not query Caissier page for riders (fallback to storage):", e);
           }
         } else if (activeUrl.includes("traitementlivreurexcute")) {
           exportNonDeliveredBtn.innerHTML = `
@@ -1837,30 +2323,50 @@ document.addEventListener("DOMContentLoaded", async () => {
               console.warn("Avertissement renvoyé par TraitementLivreur:", response.message);
             }
           } catch (e) {
-            console.warn("Could not query active tab for live non-delivered parcels:", e);
-            alert(e.message || "Erreur lors de l'extraction des colis de la tournée.");
-            return;
+            console.warn("Could not query active tab for live non-delivered parcels (fallback to storage):", e);
           }
         }
 
         // Rafraîchir le badge du compteur
         updateNonDeliveredBadge();
 
-        // 2. Read all accumulated non-delivered parcels from storage
-        const { gofleet_non_delivered_by_rider = {} } = await chrome.storage.local.get(
-          "gofleet_non_delivered_by_rider"
-        );
+        // 2. Read all accumulated non-delivered parcels & rider stats from storage (with >24h history fallback)
+        const {
+          gofleet_non_delivered_by_rider = {},
+          gofleet_non_delivered_history = {},
+          deliveryBoys = [],
+        } = await chrome.storage.local.get([
+          "gofleet_non_delivered_by_rider",
+          "gofleet_non_delivered_history",
+          "deliveryBoys",
+        ]);
 
-        const res = await buildSleekNonDeliveredWorkbook(gofleet_non_delivered_by_rider);
+        const storedHistoryMap =
+          caissierResp?.date && gofleet_non_delivered_history[caissierResp.date]
+            ? gofleet_non_delivered_history[caissierResp.date]
+            : null;
+        const ridersParcelSource =
+          caissierResp?.data && Object.keys(caissierResp.data).length > 0
+            ? caissierResp.data
+            : storedHistoryMap && Object.keys(storedHistoryMap).length > 0
+              ? storedHistoryMap
+              : gofleet_non_delivered_by_rider;
+        const resolvedDeliveryBoys =
+          caissierResp?.deliveryBoys && caissierResp.deliveryBoys.length > 0
+            ? caissierResp.deliveryBoys
+            : deliveryBoys;
+
+        const res = await buildSleekNonDeliveredWorkbook(ridersParcelSource, resolvedDeliveryBoys);
         if (res && res.success) {
           updateNonDeliveredBadge();
           alert(
             `✅ Export Analytique Excel Réussi !\n\n` +
-            `• Colis Non Livrés : ${res.count}\n` +
-            `• Valeur CRBT en Risque : ${res.totalCRBT.toFixed(2)} DH\n` +
+            `• Total Colis Non Livrés : ${res.count}\n` +
+            `• Colis Ajournés : ${res.ajournes}\n` +
+            `• Colis Annulés / Refusés : ${res.annules}\n` +
             `• Tournées / Livreurs : ${res.totalRiders}\n` +
             `• Fichier : ${res.filename}\n\n` +
-            `📊 Tableau de bord analytique généré avec répartition par motif d'échec, actions recommandées et onglets individuels par livreur.`
+            `📊 Tableau de bord généré avec séparation Ajournés / Annulés et onglets individuels par livreur.`
           );
         }
       } catch (err) {
